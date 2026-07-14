@@ -1,0 +1,27 @@
+# Build outputs
+**/build/
+
+# Flutter/Dart generated files
+mclash/.dart_tool/
+mclash/.packages
+mclash/.pub/
+mclash/.flutter-plugins
+mclash/.flutter-plugins-dependencies
+
+# IDE and OS files
+.idea/
+mclash/.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local caches and logs
+*.log
+*.tmp
+*.bak
+*.exe
+installer/Output/
+windows-package/MclashService.exe
+windows-package/mihomo.exe
+windows-package/*.dat
+windows-package/*.mmdb

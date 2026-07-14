@@ -1,0 +1,84 @@
+# Mclash for Windows
+
+Mclash 是一款基于 Flutter 开发的 Mihomo Windows 桌面客户端，通过独立的
+`Mclash` Windows 系统服务管理代理内核。
+
+## 下载
+
+请从 [Releases](https://github.com/liuyi-htu/Mclash-for-windows/releases)
+下载最新版安装包：
+
+```text
+Mclash-Windows-Setup-1.0.0.exe
+```
+
+默认安装目录为 `D:\Program Files\Mclash`。配置文件、机场订阅、日志、运行状态
+和 GeoIP/域名数据库均保存在安装目录下。卸载时会停止并删除系统服务，同时清理
+应用文件及运行数据。
+
+## 功能
+
+- 导入本地 Mihomo/Clash YAML 配置
+- 导入并更新机场订阅
+- 启动、停止和查看 Mihomo 运行状态
+- 在常规设置中控制 `Mclash` 系统服务开机自启
+- 对比官方版本并更新 Mihomo 内核
+- 自动下载并校验 GeoSite、GeoIP 和 Country 数据
+- 通过浏览器打开代理面板
+- 限制为单实例运行
+
+## 使用
+
+1. 安装并启动 Mclash。
+2. 点击右上角按钮，导入本地配置或机场订阅。
+3. 选择需要使用的配置。
+4. 点击“启动代理”。
+5. 如需开机自动启动系统服务，请在“常规设置”中开启“开机自启”。
+
+Mihomo 外部控制接口固定为：
+
+```yaml
+external-controller: 127.0.0.1:9090
+```
+
+代理端口仍以导入配置中的 `mixed-port`、`port` 或 `socks-port` 为准。
+
+## 本地构建
+
+构建环境：
+
+- Windows 10 或更高版本
+- Flutter（启用 Windows 桌面支持）
+- Go
+- Visual Studio C++ 构建工具
+- Inno Setup 6
+
+运行：
+
+```powershell
+.\scripts\build-windows.ps1
+```
+
+构建脚本会下载并校验最新的官方 Mihomo 内核与 GeoSite/GeoIP/Country 数据，
+执行 Dart 和 Go 检查，并生成：
+
+```text
+installer\Output\Mclash-Windows-Setup-1.0.0.exe
+```
+
+## GitHub 构建
+
+推送 `v*` 标签后，GitHub Actions 会在 Windows Runner 上自动构建安装包，并将
+安装包及 SHA-256 校验文件发布到 GitHub Releases。
+
+## 项目结构
+
+- `mclash`：Flutter Windows 客户端
+- `windows-service`：Windows 服务管理器与 Mihomo 更新程序
+- `installer`：Inno Setup 安装脚本
+- `scripts`：Windows 构建脚本
+- `windows-package`：打包配置与运行数据模板
+
+## 许可证
+
+本项目依据 [GPL-3.0](LICENSE) 许可证开源。

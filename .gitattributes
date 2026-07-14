@@ -1,0 +1,8 @@
+*.sh text eol=lf
+*.dart text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.xml text eol=lf
+*.png binary
+.gitignore text eol=lf
+LICENSE text eol=lf
