@@ -144,5 +144,5 @@ Copy-Item -LiteralPath $mihomo -Destination $releaseDir -Force
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup failed with exit code $LASTEXITCODE."
 }
-$installer = Join-Path $root "installer\Output\Mclash-Windows-Setup-1.0.0.exe"
+$installer = Join-Path $root "installer\Output\Mclash-Windows-Setup-1.0.1.exe"
 Write-Host "Windows installer: $installer"

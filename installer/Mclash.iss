@@ -1,5 +1,5 @@
 #define MyAppName "Mclash"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppExeName "Mclash.exe"
 
 [Setup]
@@ -9,7 +9,7 @@ AppVersion={#MyAppVersion}
 DefaultDirName=D:\Program Files\Mclash
 DefaultGroupName=Mclash
 OutputDir=Output
-OutputBaseFilename=Mclash-Windows-Setup-1.0.0
+OutputBaseFilename=Mclash-Windows-Setup-1.0.1
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

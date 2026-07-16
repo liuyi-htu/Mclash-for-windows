@@ -9,7 +9,7 @@ Mclash 是一款基于 Flutter 开发的 Mihomo Windows 桌面客户端，通过
 下载最新版安装包：
 
 ```text
-Mclash-Windows-Setup-1.0.0.exe
+Mclash-Windows-Setup-1.0.1.exe
 ```
 
 默认安装目录为 `D:\Program Files\Mclash`。配置文件、机场订阅、日志、运行状态
@@ -63,7 +63,7 @@ external-controller: 127.0.0.1:9090
 执行 Dart 和 Go 检查，并生成：
 
 ```text
-installer\Output\Mclash-Windows-Setup-1.0.0.exe
+installer\Output\Mclash-Windows-Setup-1.0.1.exe
 ```
 
 ## GitHub 构建
