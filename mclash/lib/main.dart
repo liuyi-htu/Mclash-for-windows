@@ -120,16 +120,12 @@ class MclashApp extends StatelessWidget {
         color: card,
         surfaceTintColor: Colors.transparent,
         elevation: 8,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: card,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: card,
@@ -144,14 +140,9 @@ class MclashApp extends StatelessWidget {
         backgroundColor:
             dark ? const Color(0xFF27344B) : const Color(0xFF283247),
         contentTextStyle: const TextStyle(color: Colors.white),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
-      dividerTheme: DividerThemeData(
-        color: divider,
-        thickness: 1,
-      ),
+      dividerTheme: DividerThemeData(color: divider, thickness: 1),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: card,
         surfaceTintColor: Colors.transparent,

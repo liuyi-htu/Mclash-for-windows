@@ -2,6 +2,20 @@ enum ProxyStatus { stopped, starting, running, stopping }
 
 enum NetworkMode { proxy, tun }
 
+enum CoreType { mihomo, singBox }
+
+class DebugLogFile {
+  const DebugLogFile({
+    required this.id,
+    required this.displayName,
+    required this.description,
+  });
+
+  final String id;
+  final String displayName;
+  final String description;
+}
+
 class CoreUpdateInfo {
   const CoreUpdateInfo({
     required this.currentVersion,

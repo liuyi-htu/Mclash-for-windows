@@ -63,7 +63,7 @@ func installService(paths appPaths) error {
 		if updateErr := service.UpdateConfig(config); updateErr != nil {
 			return fmt.Errorf("update existing service configuration: %w", updateErr)
 		}
-		_ = os.Remove(filepath.Join(paths.BaseDir, "MclashService.exe"))
+		_ = os.Remove(filepath.Join(paths.BaseDir, "mihomoService.exe"))
 		return nil
 	}
 	if err := migrateLegacyData(paths); err != nil {
@@ -83,7 +83,7 @@ func installService(paths appPaths) error {
 	if err := service.Close(); err != nil {
 		return err
 	}
-	_ = os.Remove(filepath.Join(paths.BaseDir, "MclashService.exe"))
+	_ = os.Remove(filepath.Join(paths.BaseDir, "mihomoService.exe"))
 	return nil
 }
 

@@ -87,8 +87,21 @@ func run(args []string) int {
 		}
 		fmt.Println(string(data))
 		return 0
+	case "singbox-update-json":
+		info, _, updateErr := checkSingBoxUpdate(paths)
+		if updateErr != nil {
+			return fail(updateErr)
+		}
+		data, marshalErr := json.Marshal(info)
+		if marshalErr != nil {
+			return fail(marshalErr)
+		}
+		fmt.Println(string(data))
+		return 0
 	case "update-core":
 		err = updateCore(paths)
+	case "update-singbox":
+		err = updateSingBox(paths)
 	case "run-service":
 		err = svc.Run(serviceName, &serviceHandler{paths: paths})
 	default:
@@ -115,7 +128,7 @@ func parsePaths(command string, args []string) (appPaths, error) {
 
 func isMutation(command string) bool {
 	switch command {
-	case "install", "uninstall", "start", "stop", "restart", "update-core", "enable-autostart", "disable-autostart":
+	case "install", "uninstall", "start", "stop", "restart", "update-core", "update-singbox", "enable-autostart", "disable-autostart":
 		return true
 	default:
 		return false
@@ -132,18 +145,19 @@ func contains(args []string, wanted string) bool {
 }
 
 func fail(err error) int {
-	fmt.Fprintln(os.Stderr, "mihomoService:", err)
+	fmt.Fprintln(os.Stderr, "MclashService:", err)
 	return 1
 }
 
 func printHelp() {
-	fmt.Println(`mihomoService manages the Mclash Mihomo Windows service.
+	fmt.Println(`MclashService manages the Mclash Windows service.
 
 Usage:
-  mihomoService.exe <command> [--base <directory>] [--data-dir <directory>]
+  MclashService.exe <command> [--base <directory>] [--data-dir <directory>]
 
 Commands:
   install uninstall start stop restart status status-json
   autostart-json enable-autostart disable-autostart
-  core-update-json update-core run-service help`)
+  core-update-json update-core singbox-update-json update-singbox
+  run-service help`)
 }

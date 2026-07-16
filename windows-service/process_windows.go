@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,83 @@ import (
 	"syscall"
 	"time"
 )
+
+func selectedCore(paths appPaths) string {
+	data, err := os.ReadFile(paths.State)
+	if err != nil {
+		return "mihomo"
+	}
+	state := map[string]any{}
+	if json.Unmarshal(data, &state) == nil && state["coreType"] == "sing-box" {
+		return "sing-box"
+	}
+	return "mihomo"
+}
+
+func debugLoggingEnabled(paths appPaths) bool {
+	data, err := os.ReadFile(paths.State)
+	if err != nil {
+		return false
+	}
+	state := map[string]any{}
+	return json.Unmarshal(data, &state) == nil && state["debugLoggingEnabled"] == true
+}
+
+func validateSelectedConfig(paths appPaths) error {
+	if selectedCore(paths) == "sing-box" {
+		if err := validateRegularNonEmpty(paths.SingBoxExe, ".exe"); err != nil {
+			return err
+		}
+		if err := validateRegularNonEmpty(paths.SingBoxConfig, ".json"); err != nil {
+			return err
+		}
+		cmd := exec.Command(paths.SingBoxExe, "check", "-c", paths.SingBoxConfig)
+		cmd.Dir = paths.DataDir
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("sing-box configuration check failed: %w: %s", err, string(output))
+		}
+		return nil
+	}
+	return validateMihomoConfig(paths)
+}
+
+func startSelectedCore(paths appPaths) (*mihomoProcess, error) {
+	if selectedCore(paths) == "sing-box" {
+		return startCoreProcess(paths, paths.SingBoxExe, paths.SingBoxLog, paths.DataDir, []string{"run", "-c", paths.SingBoxConfig})
+	}
+	return startMihomo(paths)
+}
+
+func startCoreProcess(paths appPaths, executable, logPath, workingDir string, args []string) (*mihomoProcess, error) {
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open core log: %w", err)
+	}
+	logWriter := &debugLogWriter{paths: paths, file: logFile}
+	cmd := exec.Command(executable, args...)
+	cmd.Dir, cmd.Stdout, cmd.Stderr = workingDir, logWriter, logWriter
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return nil, err
+	}
+	p := &mihomoProcess{cmd: cmd, exit: make(chan error, 1), logFile: logFile}
+	go func() { err := cmd.Wait(); logFile.Close(); p.exit <- err }()
+	return p, nil
+}
+
+type debugLogWriter struct {
+	paths appPaths
+	file  *os.File
+}
+
+func (w *debugLogWriter) Write(data []byte) (int, error) {
+	if !debugLoggingEnabled(w.paths) {
+		return len(data), nil
+	}
+	return w.file.Write(data)
+}
 
 type mihomoProcess struct {
 	cmd      *exec.Cmd
@@ -39,26 +117,7 @@ func validateMihomoConfig(paths appPaths) error {
 }
 
 func startMihomo(paths appPaths) (*mihomoProcess, error) {
-	logFile, err := os.OpenFile(paths.MihomoLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("open mihomo log: %w", err)
-	}
-	cmd := exec.Command(paths.MihomoExe, "-d", paths.DataDir, "-f", paths.Config)
-	cmd.Dir = paths.DataDir
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	if err := cmd.Start(); err != nil {
-		logFile.Close()
-		return nil, fmt.Errorf("start mihomo: %w", err)
-	}
-	p := &mihomoProcess{cmd: cmd, exit: make(chan error, 1), logFile: logFile}
-	go func() {
-		err := cmd.Wait()
-		logFile.Close()
-		p.exit <- err
-	}()
-	return p, nil
+	return startCoreProcess(paths, paths.MihomoExe, paths.MihomoLog, paths.DataDir, []string{"-d", paths.DataDir, "-f", paths.Config})
 }
 
 func (p *mihomoProcess) pid() int {

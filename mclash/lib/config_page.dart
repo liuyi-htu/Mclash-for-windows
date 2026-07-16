@@ -22,6 +22,7 @@ class _ConfigPageState extends State<ConfigPage> {
   bool _loading = true;
   bool _working = false;
   bool _testingSubscriptionUrl = false;
+  CoreType _coreType = CoreType.mihomo;
 
   @override
   void initState() {
@@ -31,9 +32,11 @@ class _ConfigPageState extends State<ConfigPage> {
 
   Future<void> _load() async {
     try {
+      final coreType = await _service.getCoreType();
       final profiles = await _service.getConfigs();
       if (!mounted) return;
       setState(() {
+        _coreType = coreType;
         _profiles = profiles;
         _loading = false;
       });
@@ -111,7 +114,7 @@ class _ConfigPageState extends State<ConfigPage> {
                       decoration: const InputDecoration(
                         labelText: '订阅链接',
                         hintText: 'https://...',
-                        helperText: '使用 Mclash/Mihomo 订阅链接',
+                        helperText: '使用 Mclash/mihomo 订阅链接',
                       ),
                       keyboardType: TextInputType.url,
                       autocorrect: false,
@@ -592,22 +595,27 @@ class _ConfigPageState extends State<ConfigPage> {
                 ),
               ),
               itemBuilder: (context) => [
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: _AddConfigAction.local,
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.file_open_outlined),
-                    title: Text('导入本地 YAML'),
+                    leading: const Icon(Icons.file_open_outlined),
+                    title: Text(
+                      _coreType == CoreType.mihomo
+                          ? '导入 mihomo YAML'
+                          : '导入 sing-box JSON',
+                    ),
                   ),
                 ),
-                const PopupMenuItem(
-                  value: _AddConfigAction.subscription,
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.cloud_download_outlined),
-                    title: Text('添加机场订阅'),
+                if (_coreType == CoreType.mihomo)
+                  const PopupMenuItem(
+                    value: _AddConfigAction.subscription,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.cloud_download_outlined),
+                      title: Text('添加机场订阅'),
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -736,7 +744,9 @@ class _ConfigPageState extends State<ConfigPage> {
                                   ),
                                   const SizedBox(height: 7),
                                   Text(
-                                    '点击右上角“＋”导入 YAML\n或添加机场订阅',
+                                    _coreType == CoreType.mihomo
+                                        ? '点击右上角“＋”导入 mihomo YAML\n或添加机场订阅'
+                                        : '点击右上角“＋”导入 sing-box JSON',
                                     textAlign: TextAlign.center,
                                     style: TextStyle(
                                       color: colors.onSurfaceVariant,

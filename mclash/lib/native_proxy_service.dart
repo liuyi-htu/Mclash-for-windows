@@ -24,6 +24,10 @@ class NativeProxyService implements ProxyPlatformService {
   Future<void> setNetworkMode(NetworkMode mode) =>
       _delegate.setNetworkMode(mode);
   @override
+  Future<CoreType> getCoreType() => _delegate.getCoreType();
+  @override
+  Future<void> setCoreType(CoreType core) => _delegate.setCoreType(core);
+  @override
   Future<ConfigInfo> getConfigInfo() => _delegate.getConfigInfo();
   @override
   Future<List<ConfigProfile>> getConfigs() => _delegate.getConfigs();
@@ -34,29 +38,41 @@ class NativeProxyService implements ProxyPlatformService {
   @override
   Future<String> getConfigContent(String id) => _delegate.getConfigContent(id);
   @override
-  Future<List<ConfigProfile>> saveConfigContent(
-          {required String id, required String content}) =>
+  Future<List<ConfigProfile>> saveConfigContent({
+    required String id,
+    required String content,
+  }) =>
       _delegate.saveConfigContent(id: id, content: content);
   @override
-  Future<List<ConfigProfile>> renameConfig(
-          {required String id, required String name}) =>
+  Future<List<ConfigProfile>> renameConfig({
+    required String id,
+    required String name,
+  }) =>
       _delegate.renameConfig(id: id, name: name);
   @override
   Future<List<ConfigProfile>> deleteConfig(String id) =>
       _delegate.deleteConfig(id);
   @override
-  Future<String> getStartupLog() => _delegate.getStartupLog();
+  Future<List<DebugLogFile>> getDebugLogs() => _delegate.getDebugLogs();
+  @override
+  Future<String> getDebugLogContent(String id) =>
+      _delegate.getDebugLogContent(id);
   @override
   Future<bool> getUsageNoticeAccepted() => _delegate.getUsageNoticeAccepted();
   @override
   Future<void> acceptUsageNotice() => _delegate.acceptUsageNotice();
   @override
-  Future<List<ConfigProfile>> addSubscription(
-          {required String name, required String url}) =>
+  Future<List<ConfigProfile>> addSubscription({
+    required String name,
+    required String url,
+  }) =>
       _delegate.addSubscription(name: name, url: url);
   @override
-  Future<List<ConfigProfile>> updateSubscription(
-          {required String id, required String name, required String url}) =>
+  Future<List<ConfigProfile>> updateSubscription({
+    required String id,
+    required String name,
+    required String url,
+  }) =>
       _delegate.updateSubscription(id: id, name: name, url: url);
   @override
   Future<List<ConfigProfile>> refreshSubscription(String id) =>
@@ -78,7 +94,8 @@ class NativeProxyService implements ProxyPlatformService {
   Future<void> setServiceAutoStartEnabled(bool enabled) =>
       _delegate.setServiceAutoStartEnabled(enabled);
   @override
-  Future<CoreUpdateInfo> checkCoreUpdate() => _delegate.checkCoreUpdate();
+  Future<CoreUpdateInfo> checkCoreUpdate(CoreType core) =>
+      _delegate.checkCoreUpdate(core);
   @override
-  Future<void> updateCore() => _delegate.updateCore();
+  Future<void> updateCore(CoreType core) => _delegate.updateCore(core);
 }

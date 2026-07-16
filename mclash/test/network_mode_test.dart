@@ -39,12 +39,13 @@ void main() {
     expect(yaml['tun']['enable'], isFalse);
   });
 
-  test('uses the clean active profile and preserves custom tun settings',
-      () async {
-    final profiles = Directory('${temporaryDirectory.path}\\profiles');
-    await profiles.create(recursive: true);
-    final profile = File('${profiles.path}\\work.yaml');
-    const source = '''
+  test(
+    'uses the clean active profile and preserves custom tun settings',
+    () async {
+      final profiles = Directory('${temporaryDirectory.path}\\profiles');
+      await profiles.create(recursive: true);
+      final profile = File('${profiles.path}\\work.yaml');
+      const source = '''
 mixed-port: 7890
 tun:
   enable: false
@@ -53,20 +54,96 @@ tun:
 rules:
   - MATCH,DIRECT
 ''';
-    await profile.writeAsString(source);
+      await profile.writeAsString(source);
+      await File('${temporaryDirectory.path}\\state.json').writeAsString(
+        jsonEncode(<String, dynamic>{'activeProfile': 'work.yaml'}),
+      );
+
+      await service.setNetworkMode(NetworkMode.tun);
+
+      expect(await profile.readAsString(), source);
+      final runtime = loadYaml(
+        await File(
+          '${temporaryDirectory.path}\\config.yaml',
+        ).readAsString(),
+      ) as YamlMap;
+      expect(runtime['tun']['enable'], isTrue);
+      expect(runtime['tun']['stack'], 'system');
+      expect(runtime['tun']['strict-route'], isTrue);
+      expect(runtime['tun']['auto-route'], isTrue);
+    },
+  );
+
+  test('creates and removes a managed sing-box TUN inbound', () async {
+    final config = File('${temporaryDirectory.path}\\sing-box.json');
+    await config.writeAsString('''
+{"inbounds":[{"type":"mixed","listen_port":7890}],"outbounds":[{"type":"direct"}]}
+''');
+    await service.setCoreType(CoreType.singBox);
+    await service.setNetworkMode(NetworkMode.tun);
+    var decoded =
+        jsonDecode(await config.readAsString()) as Map<String, dynamic>;
+    expect(
+      (decoded['inbounds'] as List).any(
+        (entry) => entry is Map && entry['tag'] == 'mclash-tun',
+      ),
+      isTrue,
+    );
+    final ruleSets = (decoded['route'] as Map)['rule_set'] as List;
+    expect(
+      ruleSets.map((entry) => (entry as Map)['tag']),
+      containsAll(<String>[
+        'geoip-cn',
+        'geosite-cn',
+        'geosite-private',
+        'geosite-category-ads-all',
+        'geosite-geolocation-!cn',
+      ]),
+    );
+    expect(
+      ruleSets.every(
+        (entry) =>
+            entry is Map &&
+            entry['type'] == 'local' &&
+            entry['path'].toString().startsWith('rulesets/'),
+      ),
+      isTrue,
+    );
+    await service.setNetworkMode(NetworkMode.proxy);
+    decoded = jsonDecode(await config.readAsString()) as Map<String, dynamic>;
+    expect(
+      (decoded['inbounds'] as List).any(
+        (entry) => entry is Map && entry['tag'] == 'mclash-tun',
+      ),
+      isFalse,
+    );
+  });
+
+  test('lists only profiles supported by the selected core', () async {
+    final profiles = Directory('${temporaryDirectory.path}\\profiles');
+    await profiles.create(recursive: true);
+    await File('${profiles.path}\\clash.yaml').writeAsString(
+      'mixed-port: 7890\nrules:\n  - MATCH,DIRECT\n',
+    );
+    await File('${profiles.path}\\sing-box.json').writeAsString(
+      '{"inbounds":[],"outbounds":[{"type":"direct"}]}',
+    );
     await File('${temporaryDirectory.path}\\state.json').writeAsString(
-      jsonEncode(<String, dynamic>{'activeProfile': 'work.yaml'}),
+      jsonEncode(<String, dynamic>{
+        'profileNames': <String, String>{
+          'clash.yaml': 'mihomo 配置',
+          'sing-box.json': 'sing-box 配置',
+        },
+      }),
     );
 
-    await service.setNetworkMode(NetworkMode.tun);
+    expect((await service.getConfigs()).map((item) => item.id), <String>[
+      'clash.yaml',
+    ]);
 
-    expect(await profile.readAsString(), source);
-    final runtime = loadYaml(
-      await File('${temporaryDirectory.path}\\config.yaml').readAsString(),
-    ) as YamlMap;
-    expect(runtime['tun']['enable'], isTrue);
-    expect(runtime['tun']['stack'], 'system');
-    expect(runtime['tun']['strict-route'], isTrue);
-    expect(runtime['tun']['auto-route'], isTrue);
+    await service.setCoreType(CoreType.singBox);
+    expect((await service.getConfigs()).map((item) => item.id), <String>[
+      'sing-box.json',
+    ]);
   });
 }

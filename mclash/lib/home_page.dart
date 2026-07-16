@@ -8,7 +8,9 @@ import 'config_page.dart';
 import 'models.dart';
 import 'native_proxy_service.dart';
 
-enum _HomeMenuAction { switchMode, config, generalSettings }
+enum _HomeMenuAction { config, generalSettings }
+
+enum _RunModeChoice { mihomoTun, mihomoProxy, singBoxTun, singBoxProxy }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -25,7 +27,9 @@ class _HomePageState extends State<HomePage> {
   bool _debugLoggingEnabled = false;
   bool _serviceAutoStartEnabled = false;
   NetworkMode _networkMode = NetworkMode.proxy;
+  CoreType _coreType = CoreType.mihomo;
   bool _switchingMode = false;
+  bool _operationDialogOpen = false;
   Timer? _statusTimer;
 
   @override
@@ -206,6 +210,7 @@ class _HomePageState extends State<HomePage> {
       final serviceAutoStartEnabled =
           await _service.getServiceAutoStartEnabled();
       final networkMode = await _service.getNetworkMode();
+      final coreType = await _service.getCoreType();
       await _service.syncSystemProxy();
       if (!mounted) return;
       setState(() {
@@ -214,6 +219,7 @@ class _HomePageState extends State<HomePage> {
         _debugLoggingEnabled = debugLoggingEnabled;
         _serviceAutoStartEnabled = serviceAutoStartEnabled;
         _networkMode = networkMode;
+        _coreType = coreType;
       });
     } catch (error) {
       if (!mounted) return;
@@ -235,10 +241,11 @@ class _HomePageState extends State<HomePage> {
     const url = 'https://board.zash.run.place/#/proxies';
     try {
       await Process.start(
-        'explorer.exe',
-        const [url],
-        mode: ProcessStartMode.detached,
-      );
+          'explorer.exe',
+          const [
+            url,
+          ],
+          mode: ProcessStartMode.detached);
     } catch (error) {
       if (mounted) _showError('打开代理面板失败：$error');
     }
@@ -246,9 +253,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _handleMenuAction(_HomeMenuAction action) async {
     switch (action) {
-      case _HomeMenuAction.switchMode:
-        await _switchNetworkMode();
-        return;
       case _HomeMenuAction.config:
         await _openConfigPage();
         return;
@@ -258,17 +262,20 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _switchNetworkMode() async {
+  Future<void> _switchRunMode(CoreType core, NetworkMode target) async {
     if (_switchingMode ||
         _status == ProxyStatus.starting ||
         _status == ProxyStatus.stopping) {
       return;
     }
-    final target =
-        _networkMode == NetworkMode.proxy ? NetworkMode.tun : NetworkMode.proxy;
+    if (target == _networkMode && core == _coreType) return;
     final wasRunning = _status == ProxyStatus.running;
     setState(() => _switchingMode = true);
+    if (wasRunning) {
+      _showOperationWaitDialog('正在切换运行模式', 8);
+    }
     try {
+      await _service.setCoreType(core);
       await _service.setNetworkMode(target);
       if (wasRunning) {
         await _service.restart();
@@ -278,20 +285,27 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() {
         _networkMode = target;
-        _switchingMode = false;
+        _coreType = core;
         _status = wasRunning ? ProxyStatus.running : _status;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            target == NetworkMode.tun ? '已切换到 TUN 模式' : '已切换到代理模式',
+            '已切换到 ${core == CoreType.mihomo ? 'mihomo' : 'sing-box'} + '
+            '${target == NetworkMode.tun ? 'TUN' : '系统代理'}',
           ),
         ),
       );
     } catch (error) {
       if (!mounted) return;
-      setState(() => _switchingMode = false);
       _showError('切换模式失败：$error');
+    } finally {
+      if (wasRunning) {
+        _closeOperationWaitDialog();
+      }
+      if (mounted) {
+        setState(() => _switchingMode = false);
+      }
     }
   }
 
@@ -328,9 +342,7 @@ class _HomePageState extends State<HomePage> {
                         try {
                           await _service.setServiceAutoStartEnabled(enabled);
                           if (mounted) {
-                            setState(
-                              () => _serviceAutoStartEnabled = enabled,
-                            );
+                            setState(() => _serviceAutoStartEnabled = enabled);
                           }
                         } catch (error) {
                           if (mounted) _showError('修改服务开机自启失败：$error');
@@ -340,6 +352,15 @@ class _HomePageState extends State<HomePage> {
                           }
                         }
                       },
+              ),
+              _settingsTile(
+                context: sheetContext,
+                icon: Icons.swap_horiz_rounded,
+                title: '运行模式',
+                subtitle:
+                    '${_coreType == CoreType.mihomo ? 'mihomo' : 'sing-box'} + '
+                    '${_networkMode == NetworkMode.proxy ? '系统代理' : 'TUN'}',
+                onTap: _showRunModeDialog,
               ),
               _settingsTile(
                 context: sheetContext,
@@ -366,6 +387,60 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  Future<void> _showRunModeDialog() async {
+    final current = switch ((_coreType, _networkMode)) {
+      (CoreType.mihomo, NetworkMode.tun) => _RunModeChoice.mihomoTun,
+      (CoreType.mihomo, NetworkMode.proxy) => _RunModeChoice.mihomoProxy,
+      (CoreType.singBox, NetworkMode.tun) => _RunModeChoice.singBoxTun,
+      (CoreType.singBox, NetworkMode.proxy) => _RunModeChoice.singBoxProxy,
+    };
+    final selected = await showDialog<_RunModeChoice>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('选择运行模式'),
+        content: RadioGroup<_RunModeChoice>(
+          groupValue: current,
+          onChanged: (value) => Navigator.of(dialogContext).pop(value),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<_RunModeChoice>(
+                value: _RunModeChoice.mihomoTun,
+                title: Text('mihomo + TUN'),
+              ),
+              RadioListTile<_RunModeChoice>(
+                value: _RunModeChoice.mihomoProxy,
+                title: Text('mihomo + 系统代理'),
+              ),
+              RadioListTile<_RunModeChoice>(
+                value: _RunModeChoice.singBoxTun,
+                title: Text('sing-box + TUN'),
+              ),
+              RadioListTile<_RunModeChoice>(
+                value: _RunModeChoice.singBoxProxy,
+                title: Text('sing-box + 系统代理'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    final core = switch (selected) {
+      _RunModeChoice.mihomoTun || _RunModeChoice.mihomoProxy => CoreType.mihomo,
+      _RunModeChoice.singBoxTun ||
+      _RunModeChoice.singBoxProxy =>
+        CoreType.singBox,
+    };
+    final mode = switch (selected) {
+      _RunModeChoice.mihomoTun || _RunModeChoice.singBoxTun => NetworkMode.tun,
+      _RunModeChoice.mihomoProxy ||
+      _RunModeChoice.singBoxProxy =>
+        NetworkMode.proxy,
+    };
+    await _switchRunMode(core, mode);
   }
 
   Widget _settingsTile({
@@ -398,82 +473,118 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _showCoreUpdate() async {
-    unawaited(
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => const AlertDialog(
-          content: Row(
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 18),
-              Expanded(child: Text('正在检查 Mihomo 官方版本…')),
+              const Text('更新内核',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 18),
+              _coreUpdateCard(sheetContext, CoreType.mihomo, 'mihomo'),
+              const SizedBox(height: 12),
+              _coreUpdateCard(sheetContext, CoreType.singBox, 'sing-box'),
+              const SizedBox(height: 14),
+              const Center(child: Text('更新正在运行的内核前，请先停止代理。')),
             ],
           ),
         ),
       ),
     );
+  }
 
-    CoreUpdateInfo info;
-    try {
-      info = await _service.checkCoreUpdate();
-    } catch (error) {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        _showError(error);
-      }
-      return;
-    }
-    if (!mounted) return;
-    Navigator.of(context, rootNavigator: true).pop();
-
-    final shouldUpdate = await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            icon: const Icon(Icons.system_update_alt_rounded),
-            title: const Text('Mihomo 内核更新'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
+  Widget _coreUpdateCard(
+    BuildContext context,
+    CoreType core,
+    String name,
+  ) {
+    CoreUpdateInfo? info;
+    var busy = false;
+    return StatefulBuilder(
+      builder: (context, setCardState) {
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('当前版本：${info.currentVersion}'),
-                const SizedBox(height: 8),
-                Text('官方版本：${info.latestVersion}'),
-                const SizedBox(height: 14),
                 Text(
-                  info.updateAvailable
-                      ? '检测到较新版本。更新前请先停止代理。'
-                      : '当前内核已是最新版本，无需更新。',
+                  name,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  info == null
+                      ? '尚未检测版本'
+                      : '当前 ${info!.currentVersion} / 官方 ${info!.latestVersion}',
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: busy
+                            ? null
+                            : () async {
+                                setCardState(() => busy = true);
+                                try {
+                                  info = await _service.checkCoreUpdate(core);
+                                } catch (error) {
+                                  if (mounted) _showError(error);
+                                }
+                                if (context.mounted) {
+                                  setCardState(() => busy = false);
+                                }
+                              },
+                        child: const Text('检测版本'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: busy || _status != ProxyStatus.stopped
+                            ? null
+                            : () async {
+                                setCardState(() => busy = true);
+                                try {
+                                  info ??= await _service.checkCoreUpdate(core);
+                                  await _service.updateCore(core);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(
+                                      this.context,
+                                    ).showSnackBar(
+                                      SnackBar(
+                                        content: Text('$name 内核更新完成'),
+                                      ),
+                                    );
+                                  }
+                                } catch (error) {
+                                  if (mounted) _showError(error);
+                                }
+                                if (context.mounted) {
+                                  setCardState(() => busy = false);
+                                }
+                              },
+                        child: const Text('更新内核'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('关闭'),
-              ),
-              if (info.updateAvailable)
-                FilledButton(
-                  onPressed: _status == ProxyStatus.stopped
-                      ? () => Navigator.of(dialogContext).pop(true)
-                      : null,
-                  child: const Text('更新内核'),
-                ),
-            ],
           ),
-        ) ??
-        false;
-    if (!shouldUpdate) return;
-
-    try {
-      await _service.updateCore();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Mihomo 已更新到 ${info.latestVersion}')),
-      );
-    } catch (error) {
-      if (mounted) _showError(error);
-    }
+        );
+      },
+    );
   }
 
   Future<void> _showAbout() async {
@@ -518,8 +629,10 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('Telegram group',
-                style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text(
+              'Telegram group',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 4),
             const SelectableText('https://telegram.me/+QqTdo3bY8eAyZmFl'),
           ],
@@ -542,7 +655,12 @@ class _HomePageState extends State<HomePage> {
     try {
       if (_status == ProxyStatus.running) {
         setState(() => _status = ProxyStatus.stopping);
-        await _service.stop();
+        _showOperationWaitDialog('正在停止代理', 3);
+        try {
+          await _service.stop();
+        } finally {
+          _closeOperationWaitDialog();
+        }
         if (!mounted) return;
         setState(() => _status = ProxyStatus.stopped);
         return;
@@ -554,53 +672,120 @@ class _HomePageState extends State<HomePage> {
       }
 
       setState(() => _status = ProxyStatus.starting);
-      await _service.start();
+      _showOperationWaitDialog('正在启动代理', 5);
+      try {
+        await _service.start();
+      } finally {
+        _closeOperationWaitDialog();
+      }
       if (!mounted) return;
       setState(() => _status = ProxyStatus.running);
     } catch (error) {
+      _closeOperationWaitDialog();
       if (!mounted) return;
       setState(() => _status = ProxyStatus.stopped);
       _showError(error);
     }
   }
 
+  void _showOperationWaitDialog(String title, int seconds) {
+    _operationDialogOpen = true;
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Row(
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(width: 18),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 6),
+                      Text('预计约 $seconds 秒'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ).whenComplete(() => _operationDialogOpen = false),
+    );
+  }
+
+  void _closeOperationWaitDialog() {
+    if (!_operationDialogOpen || !mounted) return;
+    _operationDialogOpen = false;
+    Navigator.of(context, rootNavigator: true).pop();
+  }
+
   Future<void> _showDebugLogSettings() async {
     var enabled = _debugLoggingEnabled;
+    late final List<DebugLogFile> logs;
+    try {
+      logs = await _service.getDebugLogs();
+    } catch (error) {
+      if (mounted) _showError(error);
+      return;
+    }
+    if (!mounted) return;
 
     final action = await showDialog<String>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
           title: const Text('调试日志'),
-          content: SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('启用调试日志'),
-            subtitle: Text(
-              enabled ? '已启用；完整设置在下次启动代理时生效' : '已关闭；不记录应用和 Mihomo 调试输出',
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('启用调试日志'),
+                  value: enabled,
+                  onChanged: (value) async {
+                    try {
+                      await _service.setDebugLoggingEnabled(value);
+                      if (!mounted) return;
+                      setState(() => _debugLoggingEnabled = value);
+                      setDialogState(() => enabled = value);
+                    } catch (error) {
+                      if (!mounted) return;
+                      _showError(error);
+                    }
+                  },
+                ),
+                const Divider(height: 24),
+                for (final log in logs)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      log.id == 'mihomo.log'
+                          ? Icons.memory_rounded
+                          : Icons.settings_applications_outlined,
+                    ),
+                    title: Text(log.displayName),
+                    subtitle: Text(log.description),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => _showDebugLog(log),
+                  ),
+              ],
             ),
-            value: enabled,
-            onChanged: (value) async {
-              try {
-                await _service.setDebugLoggingEnabled(value);
-                if (!mounted) return;
-                setState(() => _debugLoggingEnabled = value);
-                setDialogState(() => enabled = value);
-              } catch (error) {
-                if (!mounted) return;
-                _showError(error);
-              }
-            },
           ),
           actions: [
             TextButton.icon(
               onPressed: () => Navigator.of(dialogContext).pop('clear'),
               icon: const Icon(Icons.delete_outline),
               label: const Text('清除'),
-            ),
-            TextButton.icon(
-              onPressed: () => Navigator.of(dialogContext).pop('view'),
-              icon: const Icon(Icons.article_outlined),
-              label: const Text('查看'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
@@ -612,9 +797,7 @@ class _HomePageState extends State<HomePage> {
     );
 
     if (!mounted) return;
-    if (action == 'view') {
-      await _showDebugLog();
-    } else if (action == 'clear') {
+    if (action == 'clear') {
       await _confirmClearDebugLogs();
     }
   }
@@ -656,15 +839,15 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _showDebugLog() async {
+  Future<void> _showDebugLog(DebugLogFile file) async {
     try {
-      final log = await _service.getStartupLog();
+      final log = await _service.getDebugLogContent(file.id);
       if (!mounted) return;
 
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('调试日志'),
+          title: Text(file.displayName),
           content: SizedBox(
             width: double.maxFinite,
             child: ConstrainedBox(
@@ -711,7 +894,9 @@ class _HomePageState extends State<HomePage> {
   String get _statusText => switch (_status) {
         ProxyStatus.stopped => '未启动',
         ProxyStatus.starting => '正在启动',
-        ProxyStatus.running => '运行中',
+        ProxyStatus.running =>
+          '${_coreType == CoreType.mihomo ? 'mihomo' : 'sing-box'} + '
+              '${_networkMode == NetworkMode.proxy ? '系统代理' : 'TUN'}',
         ProxyStatus.stopping => '正在停止',
       };
 
@@ -804,18 +989,6 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               itemBuilder: (context) => [
-                _menuItem(
-                  value: _HomeMenuAction.switchMode,
-                  icon: _networkMode == NetworkMode.proxy
-                      ? Icons.vpn_lock_outlined
-                      : Icons.language_outlined,
-                  title: _switchingMode
-                      ? '正在切换模式'
-                      : _networkMode == NetworkMode.proxy
-                          ? '切换 TUN 模式'
-                          : '切换代理模式',
-                  enabled: !_switchingMode && !busy,
-                ),
                 _menuItem(
                   value: _HomeMenuAction.config,
                   icon: Icons.description_outlined,

@@ -22,6 +22,7 @@ import (
 )
 
 const mihomoReleaseAPI = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+const singBoxReleaseAPI = "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
 
 type coreUpdateInfo struct {
 	CurrentVersion  string `json:"currentVersion"`
@@ -78,7 +79,7 @@ func checkCoreUpdate(paths appPaths) (coreUpdateInfo, githubRelease, error) {
 func updateCore(paths appPaths) error {
 	status := queryStatus(paths)
 	if status.State == "running" || status.State == "start_pending" || status.State == "stop_pending" {
-		return fmt.Errorf("stop the Mclash service before updating Mihomo")
+		return fmt.Errorf("stop the Mclash service before updating mihomo")
 	}
 	info, release, err := checkCoreUpdate(paths)
 	if err != nil {
@@ -112,7 +113,7 @@ func updateCore(paths appPaths) error {
 	}
 	actual := sha256.Sum256(archive)
 	if !bytes.Equal(actual[:], expected) {
-		return fmt.Errorf("downloaded Mihomo SHA-256 does not match the official digest")
+		return fmt.Errorf("downloaded mihomo SHA-256 does not match the official digest")
 	}
 	binary, err := extractMihomoExecutable(archive)
 	if err != nil {
@@ -123,11 +124,11 @@ func updateCore(paths appPaths) error {
 	_ = os.Remove(temporary)
 	_ = os.Remove(backup)
 	if err := os.WriteFile(temporary, binary, 0o755); err != nil {
-		return fmt.Errorf("write updated Mihomo: %w", err)
+		return fmt.Errorf("write updated mihomo: %w", err)
 	}
 	defer os.Remove(temporary)
 	if err := os.Rename(paths.MihomoExe, backup); err != nil {
-		return fmt.Errorf("back up current Mihomo: %w", err)
+		return fmt.Errorf("back up current mihomo: %w", err)
 	}
 	restore := true
 	defer func() {
@@ -137,15 +138,135 @@ func updateCore(paths appPaths) error {
 		}
 	}()
 	if err := os.Rename(temporary, paths.MihomoExe); err != nil {
-		return fmt.Errorf("activate updated Mihomo: %w", err)
+		return fmt.Errorf("activate updated mihomo: %w", err)
 	}
 	installed, err := readMihomoVersion(paths.MihomoExe)
 	if err != nil || installed != info.LatestVersion {
-		return fmt.Errorf("updated Mihomo failed version verification: got %q: %v", installed, err)
+		return fmt.Errorf("updated mihomo failed version verification: got %q: %v", installed, err)
 	}
 	restore = false
 	_ = os.Remove(backup)
 	return nil
+}
+
+func checkSingBoxUpdate(paths appPaths) (coreUpdateInfo, githubRelease, error) {
+	current, err := readCoreVersion(paths.SingBoxExe, "version")
+	if err != nil {
+		return coreUpdateInfo{}, githubRelease{}, err
+	}
+	release, err := fetchGitHubRelease(singBoxReleaseAPI, "sing-box")
+	if err != nil {
+		return coreUpdateInfo{}, githubRelease{}, err
+	}
+	latest, err := normalizeVersion(release.TagName)
+	if err != nil {
+		return coreUpdateInfo{}, githubRelease{}, err
+	}
+	comparison, err := compareVersions(current, latest)
+	if err != nil {
+		return coreUpdateInfo{}, githubRelease{}, err
+	}
+	return coreUpdateInfo{CurrentVersion: current, LatestVersion: latest, UpdateAvailable: comparison < 0}, release, nil
+}
+
+func updateSingBox(paths appPaths) error {
+	status := queryStatus(paths)
+	if status.State == "running" || status.State == "start_pending" || status.State == "stop_pending" {
+		return fmt.Errorf("stop the Mclash service before updating sing-box")
+	}
+	info, release, err := checkSingBoxUpdate(paths)
+	if err != nil {
+		return err
+	}
+	if !info.UpdateAvailable {
+		return nil
+	}
+	wantedName := "sing-box-" + info.LatestVersion + "-windows-amd64.zip"
+	var downloadURL, digest string
+	for _, asset := range release.Assets {
+		if strings.EqualFold(asset.Name, wantedName) {
+			downloadURL, digest = asset.BrowserDownloadURL, asset.Digest
+			break
+		}
+	}
+	if downloadURL == "" {
+		return fmt.Errorf("official release does not contain %s", wantedName)
+	}
+	archive, err := downloadCoreArchive(downloadURL)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(strings.ToLower(digest), "sha256:") {
+		return fmt.Errorf("official release asset has no SHA-256 digest")
+	}
+	expected, err := hex.DecodeString(strings.TrimPrefix(strings.ToLower(digest), "sha256:"))
+	if err != nil {
+		return err
+	}
+	actual := sha256.Sum256(archive)
+	if !bytes.Equal(actual[:], expected) {
+		return fmt.Errorf("downloaded sing-box SHA-256 mismatch")
+	}
+	binary, err := extractMihomoExecutable(archive)
+	if err != nil {
+		return err
+	}
+	temporary, backup := paths.SingBoxExe+".update", paths.SingBoxExe+".backup"
+	_ = os.Remove(temporary)
+	_ = os.Remove(backup)
+	if err := os.WriteFile(temporary, binary, 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(paths.SingBoxExe, backup); err != nil {
+		return err
+	}
+	if err := os.Rename(temporary, paths.SingBoxExe); err != nil {
+		_ = os.Rename(backup, paths.SingBoxExe)
+		return err
+	}
+	installed, err := readCoreVersion(paths.SingBoxExe, "version")
+	if err != nil || installed != info.LatestVersion {
+		_ = os.Remove(paths.SingBoxExe)
+		_ = os.Rename(backup, paths.SingBoxExe)
+		return fmt.Errorf("updated sing-box verification failed")
+	}
+	_ = os.Remove(backup)
+	return nil
+}
+
+func readCoreVersion(path string, argument string) (string, error) {
+	if err := validateRegularNonEmpty(path, ".exe"); err != nil {
+		return "", err
+	}
+	cmd := exec.Command(path, argument)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return normalizeVersion(string(output))
+}
+
+func fetchGitHubRelease(api, name string) (githubRelease, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api, nil)
+	if err != nil {
+		return githubRelease{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "Mclash-Windows")
+	response, err := updateHTTPClient.Do(req)
+	if err != nil {
+		return githubRelease{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return githubRelease{}, fmt.Errorf("query %s release: HTTP %d", name, response.StatusCode)
+	}
+	var release githubRelease
+	err = json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&release)
+	return release, err
 }
 
 func fetchLatestMihomoRelease() (githubRelease, error) {
@@ -166,7 +287,7 @@ func fetchLatestMihomoRelease() (githubRelease, error) {
 			response.Body.Close()
 			cancel()
 			if decodeErr != nil {
-				return githubRelease{}, fmt.Errorf("decode official Mihomo release: %w", decodeErr)
+				return githubRelease{}, fmt.Errorf("decode official mihomo release: %w", decodeErr)
 			}
 			return release, nil
 		}
@@ -181,7 +302,7 @@ func fetchLatestMihomoRelease() (githubRelease, error) {
 			time.Sleep(time.Duration(attempt) * time.Second)
 		}
 	}
-	return githubRelease{}, fmt.Errorf("query official Mihomo release: %w", lastErr)
+	return githubRelease{}, fmt.Errorf("query official mihomo release: %w", lastErr)
 }
 
 func downloadCoreArchive(url string) ([]byte, error) {
@@ -194,15 +315,15 @@ func downloadCoreArchive(url string) ([]byte, error) {
 	req.Header.Set("User-Agent", "Mclash-Windows")
 	response, err := updateHTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("download Mihomo update: %w", err)
+		return nil, fmt.Errorf("download mihomo update: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download Mihomo update: HTTP %d", response.StatusCode)
+		return nil, fmt.Errorf("download mihomo update: HTTP %d", response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, 200<<20))
 	if err != nil {
-		return nil, fmt.Errorf("read Mihomo update: %w", err)
+		return nil, fmt.Errorf("read mihomo update: %w", err)
 	}
 	return data, nil
 }
@@ -210,7 +331,7 @@ func downloadCoreArchive(url string) ([]byte, error) {
 func extractMihomoExecutable(archive []byte) ([]byte, error) {
 	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
-		return nil, fmt.Errorf("open Mihomo update archive: %w", err)
+		return nil, fmt.Errorf("open mihomo update archive: %w", err)
 	}
 	for _, file := range reader.File {
 		if !strings.HasSuffix(strings.ToLower(filepath.Base(file.Name)), ".exe") {
@@ -226,11 +347,11 @@ func extractMihomoExecutable(archive []byte) ([]byte, error) {
 			return nil, readErr
 		}
 		if len(data) == 0 {
-			return nil, fmt.Errorf("Mihomo executable in update archive is empty")
+			return nil, fmt.Errorf("mihomo executable in update archive is empty")
 		}
 		return data, nil
 	}
-	return nil, fmt.Errorf("Mihomo update archive contains no executable")
+	return nil, fmt.Errorf("mihomo update archive contains no executable")
 }
 
 func readMihomoVersion(path string) (string, error) {
@@ -241,7 +362,7 @@ func readMihomoVersion(path string) (string, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("read Mihomo version: %w", err)
+		return "", fmt.Errorf("read mihomo version: %w", err)
 	}
 	return normalizeVersion(string(output))
 }

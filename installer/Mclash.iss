@@ -1,5 +1,5 @@
 #define MyAppName "Mclash"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppExeName "Mclash.exe"
 
 [Setup]
@@ -9,7 +9,7 @@ AppVersion={#MyAppVersion}
 DefaultDirName=D:\Program Files\Mclash
 DefaultGroupName=Mclash
 OutputDir=Output
-OutputBaseFilename=Mclash-Windows-Setup-1.0.1
+OutputBaseFilename=Mclash-Windows-Setup-1.0.2
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -26,15 +26,18 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Name: "{app}\data"; Permissions: users-modify
 Name: "{app}\data\profiles"; Permissions: users-modify
 Name: "{app}\data\logs"; Permissions: users-modify
+Name: "{app}\data\rulesets"; Permissions: users-modify
 
 [Files]
-Source: "..\mclash\build\windows\x64\runner\Release\*"; Excludes: "MclashService.exe,mihomoService.exe,mihomo.exe"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\windows-package\mihomoService.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\mclash\build\windows\x64\runner\Release\*"; Excludes: "MclashService.exe,mihomoService.exe,mihomo.exe,sing-box.exe"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\windows-package\MclashService.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\windows-package\mihomo.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\windows-package\sing-box.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\windows-package\config.yaml"; DestDir: "{app}\data"; Flags: onlyifdoesntexist
 Source: "..\windows-package\geosite.dat"; DestDir: "{app}\data"; DestName: "GeoSite.dat"; Flags: onlyifdoesntexist
 Source: "..\windows-package\geoip.dat"; DestDir: "{app}\data"; DestName: "GeoIP.dat"; Flags: onlyifdoesntexist
 Source: "..\windows-package\country.mmdb"; DestDir: "{app}\data"; DestName: "Country.mmdb"; Flags: onlyifdoesntexist
+Source: "..\windows-package\rulesets\*.srs"; DestDir: "{app}\data\rulesets"; Flags: ignoreversion
 Source: "..\mclash\windows\runner\resources\app_icon.ico"; DestDir: "{app}"; DestName: "Mclash.ico"; Flags: ignoreversion
 
 [Icons]
@@ -42,13 +45,14 @@ Name: "{group}\Mclash"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\
 Name: "{autodesktop}\Mclash"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Mclash.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\mihomoService.exe"; Parameters: "install --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated
+Filename: "{app}\MclashService.exe"; Parameters: "install --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Mclash"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{app}\mihomoService.exe"; Parameters: "stop --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopMclashService"
-Filename: "{app}\mihomoService.exe"; Parameters: "uninstall --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveMclashService"
+Filename: "{app}\MclashService.exe"; Parameters: "stop --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopMclashService"
+Filename: "{app}\MclashService.exe"; Parameters: "uninstall --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveMclashService"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{commonappdata}\Mclash"
+Type: files; Name: "{app}\mihomoService.exe"

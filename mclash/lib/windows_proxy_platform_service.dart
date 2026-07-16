@@ -20,8 +20,9 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
   String get _logsDir => '$_dataDir\\logs';
   String get _statePath => '$_dataDir\\state.json';
   String get _configPath => '$_dataDir\\config.yaml';
+  String get _singBoxConfigPath => '$_dataDir\\sing-box.json';
   String get _serviceExe =>
-      '${File(Platform.resolvedExecutable).parent.path}\\mihomoService.exe';
+      '${File(Platform.resolvedExecutable).parent.path}\\MclashService.exe';
 
   Future<void> _ensureDirectories() async {
     await Directory(_profilesDir).create(recursive: true);
@@ -42,8 +43,9 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
     final state = await _readState()
       ..addAll(changes);
     final temporary = File('$_statePath.tmp');
-    await temporary
-        .writeAsString(const JsonEncoder.withIndent('  ').convert(state));
+    await temporary.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(state),
+    );
     await temporary.rename(_statePath);
   }
 
@@ -54,17 +56,21 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
       if (decoded is Map<String, dynamic>) return decoded;
     } catch (_) {}
     if (!File(_serviceExe).existsSync()) {
-      throw StateError('mihomoService.exe was not found next to Mclash.exe.');
+      throw StateError('MclashService.exe was not found next to Mclash.exe.');
     }
-    throw StateError(result.stderr.toString().trim().isEmpty
-        ? 'Unable to read the Windows service status.'
-        : result.stderr.toString().trim());
+    throw StateError(
+      result.stderr.toString().trim().isEmpty
+          ? 'Unable to read the Windows service status.'
+          : result.stderr.toString().trim(),
+    );
   }
 
-  Future<ProcessResult> _runService(String command,
-      {bool allowFailure = false}) async {
+  Future<ProcessResult> _runService(
+    String command, {
+    bool allowFailure = false,
+  }) async {
     if (!await File(_serviceExe).exists()) {
-      throw StateError('mihomoService.exe was not found next to Mclash.exe.');
+      throw StateError('MclashService.exe was not found next to Mclash.exe.');
     }
     final result = await Process.run(
         _serviceExe,
@@ -79,7 +85,8 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
     if (!allowFailure && result.exitCode != 0) {
       final message = result.stderr.toString().trim();
       throw StateError(
-          message.isEmpty ? '$command failed (${result.exitCode}).' : message);
+        message.isEmpty ? '$command failed (${result.exitCode}).' : message,
+      );
     }
     return result;
   }
@@ -167,12 +174,30 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
   }
 
   Future<int> _systemProxyPort() async {
+    if (await getCoreType() == CoreType.singBox) {
+      final document =
+          jsonDecode(await File(_singBoxConfigPath).readAsString());
+      if (document is Map) {
+        final inbounds = document['inbounds'];
+        if (inbounds is List) {
+          for (final inbound in inbounds.whereType<Map>()) {
+            if (inbound['type'] == 'mixed' || inbound['type'] == 'http') {
+              final value = inbound['listen_port'];
+              final port =
+                  value is int ? value : int.tryParse(value?.toString() ?? '');
+              if (port != null && port > 0 && port <= 65535) return port;
+            }
+          }
+        }
+      }
+      throw StateError('sing-box 系统代理模式需要 mixed 或 http 入站。');
+    }
     if (!await File(_configPath).exists()) {
-      throw StateError('Mihomo configuration does not exist.');
+      throw StateError('mihomo configuration does not exist.');
     }
     final document = loadYaml(await File(_configPath).readAsString());
     if (document is! YamlMap) {
-      throw const FormatException('Mihomo configuration must be a YAML map.');
+      throw const FormatException('mihomo configuration must be a YAML map.');
     }
     for (final key in const <String>['mixed-port', 'port']) {
       final value = document[key];
@@ -204,10 +229,14 @@ public static class WinInetProxy {
 [WinInetProxy]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
 ''';
     final result = await Process.run(
-      'powershell.exe',
-      const <String>['-NoProfile', '-NonInteractive', '-Command', script],
-      runInShell: false,
-    );
+        'powershell.exe',
+        const <String>[
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          script,
+        ],
+        runInShell: false);
     if (result.exitCode != 0) {
       throw StateError('Windows 系统代理已写入，但刷新系统设置失败。');
     }
@@ -223,20 +252,31 @@ public static class WinInetProxy {
   Future<void> setNetworkMode(NetworkMode mode) async {
     await _ensureDirectories();
     final state = await _readState();
+    final core = await getCoreType();
     final active = state['activeProfile']?.toString();
     File? source;
-    if (active != null) {
+    if (core == CoreType.mihomo && active != null) {
       final profile = File(_profilePath(active));
       if (await profile.exists()) source = profile;
     }
-    source ??= await File(_configPath).exists() ? File(_configPath) : null;
+    source ??= await File(
+      core == CoreType.singBox ? _singBoxConfigPath : _configPath,
+    ).exists()
+        ? File(core == CoreType.singBox ? _singBoxConfigPath : _configPath)
+        : null;
 
     if (source != null) {
       final content = await source.readAsString();
-      await File(_configPath).writeAsString(
-        _runtimeConfig(content, mode),
-        flush: true,
-      );
+      if (core == CoreType.singBox) {
+        await File(_singBoxConfigPath).writeAsString(
+          _singBoxRuntimeConfig(content, mode),
+          flush: true,
+        );
+      } else {
+        await File(
+          _configPath,
+        ).writeAsString(_runtimeConfig(content, mode), flush: true);
+      }
     }
     await _updateState(<String, dynamic>{
       'networkMode': mode == NetworkMode.tun ? 'tun' : 'proxy',
@@ -244,21 +284,52 @@ public static class WinInetProxy {
   }
 
   @override
+  Future<CoreType> getCoreType() async =>
+      (await _readState())['coreType'] == 'sing-box'
+          ? CoreType.singBox
+          : CoreType.mihomo;
+
+  @override
+  Future<void> setCoreType(CoreType core) async {
+    final state = await _readState();
+    final activeKey = core == CoreType.singBox
+        ? 'activeSingBoxProfile'
+        : 'activeMihomoProfile';
+    final currentActive = state['activeProfile']?.toString();
+    final currentMatchesCore = currentActive != null &&
+        (core == CoreType.singBox
+            ? currentActive.toLowerCase().endsWith('.json')
+            : RegExp(r'\.(yaml|yml)$', caseSensitive: false)
+                .hasMatch(currentActive));
+    await _updateState(<String, dynamic>{
+      'coreType': core == CoreType.singBox ? 'sing-box' : 'mihomo',
+      'activeProfile':
+          state[activeKey] ?? (currentMatchesCore ? currentActive : null),
+    });
+  }
+
+  @override
   Future<ConfigInfo> getConfigInfo() async {
     final state = await _readState();
-    final exists = await File(_configPath).exists();
+    final core = await getCoreType();
+    final exists = await File(
+      core == CoreType.singBox ? _singBoxConfigPath : _configPath,
+    ).exists();
     final active = state['activeProfile']?.toString();
     final names = state['profileNames'];
     final displayName =
         names is Map && active != null ? names[active]?.toString() : null;
     return ConfigInfo(
-        exists: exists,
-        fileName: displayName ?? (exists ? 'config.yaml' : null));
+      exists: exists,
+      fileName: displayName ?? (exists ? 'config.yaml' : null),
+    );
   }
 
   String _profilePath(String id) {
-    if (!RegExp(r'^[A-Za-z0-9._-]+\.yaml$', caseSensitive: false)
-        .hasMatch(id)) {
+    if (!RegExp(
+      r'^[A-Za-z0-9._-]+\.(yaml|yml|json)$',
+      caseSensitive: false,
+    ).hasMatch(id)) {
       throw ArgumentError.value(id, 'id', 'Invalid profile id');
     }
     return '$_profilesDir\\$id';
@@ -266,11 +337,13 @@ public static class WinInetProxy {
 
   Map<String, dynamic> _stateMap(Map<String, dynamic> state, String key) =>
       Map<String, dynamic>.from(
-          state[key] is Map ? state[key] as Map : const {});
+        state[key] is Map ? state[key] as Map : const {},
+      );
 
   @override
   Future<List<ConfigProfile>> getConfigs() async {
     await _ensureDirectories();
+    final core = await getCoreType();
     var state = await _readState();
     var active = state['activeProfile']?.toString();
     final defaultProfile = File(_profilePath('default.yaml'));
@@ -291,8 +364,14 @@ public static class WinInetProxy {
     final urls = _stateMap(state, 'profileUrls');
     final files = await Directory(_profilesDir)
         .list()
-        .where((entity) =>
-            entity is File && entity.path.toLowerCase().endsWith('.yaml'))
+        .where(
+          (entity) =>
+              entity is File &&
+              (core == CoreType.mihomo
+                  ? RegExp(r'\.(yaml|yml)$', caseSensitive: false)
+                      .hasMatch(entity.path)
+                  : entity.path.toLowerCase().endsWith('.json')),
+        )
         .cast<File>()
         .toList();
     files.sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
@@ -303,16 +382,19 @@ public static class WinInetProxy {
         continue;
       }
       final stat = await file.stat();
-      profiles.add(ConfigProfile(
-        id: id,
-        name: names[id]?.toString() ?? id.substring(0, id.length - 5),
-        type:
-            types[id]?.toString() == 'subscription' ? 'subscription' : 'local',
-        url: urls[id]?.toString(),
-        active: active == id,
-        exists: true,
-        updatedAt: stat.modified.millisecondsSinceEpoch,
-      ));
+      profiles.add(
+        ConfigProfile(
+          id: id,
+          name: names[id]?.toString() ?? id.substring(0, id.lastIndexOf('.')),
+          type: types[id]?.toString() == 'subscription'
+              ? 'subscription'
+              : 'local',
+          url: urls[id]?.toString(),
+          active: active == id,
+          exists: true,
+          updatedAt: stat.modified.millisecondsSinceEpoch,
+        ),
+      );
     }
     return profiles;
   }
@@ -320,14 +402,23 @@ public static class WinInetProxy {
   @override
   Future<List<ConfigProfile>> importConfigs() async {
     await _ensureDirectories();
-    const script = r'''Add-Type -AssemblyName System.Windows.Forms
+    final core = await getCoreType();
+    final script = core == CoreType.mihomo
+        ? r'''Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Filter = 'Mihomo YAML (*.yaml)|*.yaml'
+$dialog.Filter = 'mihomo YAML (*.yaml;*.yml)|*.yaml;*.yml'
+$dialog.Multiselect = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  $dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }
+}'''
+        : r'''Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Filter = 'sing-box JSON (*.json)|*.json'
 $dialog.Multiselect = $true
 if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   $dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }
 }''';
-    final picked = await Process.run('powershell.exe', const <String>[
+    final picked = await Process.run('powershell.exe', <String>[
       '-NoProfile',
       '-STA',
       '-Command',
@@ -342,24 +433,49 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     if (paths.isEmpty) return getConfigs();
     final state = await _readState();
     final names = Map<String, dynamic>.from(
-        state['profileNames'] is Map ? state['profileNames'] as Map : const {});
+      state['profileNames'] is Map ? state['profileNames'] as Map : const {},
+    );
     for (final sourcePath in paths) {
       final source = File(sourcePath);
-      if (source.uri.pathSegments.last.toLowerCase().endsWith('.yaml') ==
-          false) {
-        throw ArgumentError('Only .yaml profiles are supported.');
+      final lowerPath = source.path.toLowerCase();
+      final extension = core == CoreType.singBox
+          ? '.json'
+          : lowerPath.endsWith('.yml')
+              ? '.yml'
+              : '.yaml';
+      if (core == CoreType.mihomo &&
+          !RegExp(r'\.(yaml|yml)$', caseSensitive: false)
+              .hasMatch(source.path)) {
+        throw ArgumentError('mihomo 内核只能导入 YAML 配置。');
       }
-      var id = source.uri.pathSegments.last
-          .replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-      if (!id.toLowerCase().endsWith('.yaml')) id = '$id.yaml';
+      if (core == CoreType.singBox && !lowerPath.endsWith('.json')) {
+        throw ArgumentError('sing-box 内核只能导入 JSON 配置。');
+      }
+      final content = await source.readAsString();
+      if (core == CoreType.mihomo) {
+        final document = loadYaml(content);
+        if (document is! YamlMap) {
+          throw const FormatException('mihomo 配置必须是 YAML 对象。');
+        }
+      } else {
+        final document = jsonDecode(content);
+        if (document is! Map<String, dynamic>) {
+          throw const FormatException('sing-box 配置必须是 JSON 对象。');
+        }
+      }
+      var id = source.uri.pathSegments.last.replaceAll(
+        RegExp(r'[^A-Za-z0-9._-]'),
+        '_',
+      );
+      if (!id.toLowerCase().endsWith(extension)) id = '$id$extension';
       var candidate = id;
       var suffix = 2;
       while (await File(_profilePath(candidate)).exists()) {
-        candidate = '${id.substring(0, id.length - 5)}-$suffix.yaml';
+        candidate = '${id.substring(0, id.lastIndexOf('.'))}-$suffix$extension';
         suffix++;
       }
       await source.copy(_profilePath(candidate));
-      names[candidate] = id.substring(0, id.length - 5);
+      names[candidate] = id.substring(0, id.lastIndexOf('.'));
     }
     await _updateState(<String, dynamic>{'profileNames': names});
     return getConfigs();
@@ -370,12 +486,16 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       RegExp(r'^\s*external-controller\s*:.*$', multiLine: true),
       'external-controller: 127.0.0.1:9090',
     );
-    if (!RegExp(r'^\s*external-controller\s*:', multiLine: true)
-        .hasMatch(result)) {
+    if (!RegExp(
+      r'^\s*external-controller\s*:',
+      multiLine: true,
+    ).hasMatch(result)) {
       result = '$result\nexternal-controller: 127.0.0.1:9090\n';
     }
     result = result.replaceAll(
-        RegExp(r'^\s*secret\s*:.*$', multiLine: true), 'secret: ""');
+      RegExp(r'^\s*secret\s*:.*$', multiLine: true),
+      'secret: ""',
+    );
     if (!RegExp(r'^\s*secret\s*:', multiLine: true).hasMatch(result)) {
       result = '$result\nsecret: ""\n';
     }
@@ -386,7 +506,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     final secured = _secureController(content);
     final document = loadYaml(secured);
     if (document is! YamlMap) {
-      throw const FormatException('Mihomo configuration must be a YAML map.');
+      throw const FormatException('mihomo configuration must be a YAML map.');
     }
 
     final editor = YamlEditor(secured);
@@ -406,18 +526,82 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
       }
     } else {
-      editor.update(<Object>[
-        'tun'
-      ], <String, dynamic>{
-        'enable': enabled,
-        if (enabled) ...<String, dynamic>{
-          'stack': 'mixed',
-          'auto-route': true,
-          'auto-detect-interface': true,
+      editor.update(
+        <Object>['tun'],
+        <String, dynamic>{
+          'enable': enabled,
+          if (enabled) ...<String, dynamic>{
+            'stack': 'mixed',
+            'auto-route': true,
+            'auto-detect-interface': true,
+          },
         },
-      });
+      );
     }
     return '${editor.toString().trimRight()}\n';
+  }
+
+  String _singBoxRuntimeConfig(String content, NetworkMode mode) {
+    final decoded = jsonDecode(content);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('sing-box 配置必须是 JSON 对象。');
+    }
+    final inbounds = List<dynamic>.from(decoded['inbounds'] is List
+        ? decoded['inbounds'] as List
+        : const <dynamic>[]);
+    inbounds.removeWhere(
+      (entry) =>
+          entry is Map &&
+          entry['type'] == 'tun' &&
+          entry['tag'] == 'mclash-tun',
+    );
+    if (mode == NetworkMode.tun) {
+      final hasTun = inbounds.any(
+        (entry) => entry is Map && entry['type'] == 'tun',
+      );
+      if (!hasTun) {
+        inbounds.insert(0, <String, dynamic>{
+          'type': 'tun',
+          'tag': 'mclash-tun',
+          'interface_name': 'Mclash',
+          'address': <String>['172.19.0.1/30'],
+          'auto_route': true,
+          'strict_route': true,
+        });
+      }
+    }
+    decoded['inbounds'] = inbounds;
+
+    final route = Map<String, dynamic>.from(
+      decoded['route'] is Map ? decoded['route'] as Map : const {},
+    );
+    final ruleSets = List<dynamic>.from(
+      route['rule_set'] is List ? route['rule_set'] as List : const [],
+    );
+    const bundledRuleSets = <String>[
+      'geoip-cn',
+      'geosite-cn',
+      'geosite-private',
+      'geosite-category-ads-all',
+      'geosite-geolocation-!cn',
+    ];
+    final existingTags = ruleSets
+        .whereType<Map>()
+        .map((entry) => entry['tag']?.toString())
+        .whereType<String>()
+        .toSet();
+    for (final tag in bundledRuleSets) {
+      if (existingTags.contains(tag)) continue;
+      ruleSets.add(<String, dynamic>{
+        'type': 'local',
+        'tag': tag,
+        'format': 'binary',
+        'path': 'rulesets/$tag.srs',
+      });
+    }
+    route['rule_set'] = ruleSets;
+    decoded['route'] = route;
+    return '${const JsonEncoder.withIndent('  ').convert(decoded)}\n';
   }
 
   Future<String> _runtimeConfigForCurrentMode(String content) async =>
@@ -429,10 +613,22 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     if (!await source.exists()) {
       throw StateError('The selected profile no longer exists.');
     }
-    await File(_configPath).writeAsString(
-      await _runtimeConfigForCurrentMode(await source.readAsString()),
-    );
-    await _updateState(<String, dynamic>{'activeProfile': id});
+    final content = await source.readAsString();
+    final isJSON = id.toLowerCase().endsWith('.json');
+    if (isJSON) {
+      await File(_singBoxConfigPath).writeAsString(
+        _singBoxRuntimeConfig(content, await getNetworkMode()),
+      );
+    } else {
+      await File(_configPath).writeAsString(
+        await _runtimeConfigForCurrentMode(content),
+      );
+    }
+    await _updateState(<String, dynamic>{
+      'activeProfile': id,
+      if (isJSON) 'activeSingBoxProfile': id else 'activeMihomoProfile': id,
+      'coreType': isJSON ? 'sing-box' : 'mihomo',
+    });
     return getConfigInfo();
   }
 
@@ -441,29 +637,41 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       File(_profilePath(id)).readAsString();
 
   @override
-  Future<List<ConfigProfile>> saveConfigContent(
-      {required String id, required String content}) async {
+  Future<List<ConfigProfile>> saveConfigContent({
+    required String id,
+    required String content,
+  }) async {
     if (content.trim().isEmpty) {
       throw ArgumentError('Configuration cannot be empty.');
     }
     await File(_profilePath(id)).writeAsString(content);
     final state = await _readState();
     if (state['activeProfile'] == id) {
-      await File(_configPath)
-          .writeAsString(await _runtimeConfigForCurrentMode(content));
+      if (id.toLowerCase().endsWith('.json')) {
+        await File(_singBoxConfigPath).writeAsString(
+          _singBoxRuntimeConfig(content, await getNetworkMode()),
+        );
+      } else {
+        await File(
+          _configPath,
+        ).writeAsString(await _runtimeConfigForCurrentMode(content));
+      }
     }
     return getConfigs();
   }
 
   @override
-  Future<List<ConfigProfile>> renameConfig(
-      {required String id, required String name}) async {
+  Future<List<ConfigProfile>> renameConfig({
+    required String id,
+    required String name,
+  }) async {
     if (name.trim().isEmpty) {
       throw ArgumentError('Profile name cannot be empty.');
     }
     final state = await _readState();
     final names = Map<String, dynamic>.from(
-        state['profileNames'] is Map ? state['profileNames'] as Map : const {});
+      state['profileNames'] is Map ? state['profileNames'] as Map : const {},
+    );
     names[id] = name.trim();
     await _updateState(<String, dynamic>{'profileNames': names});
     return getConfigs();
@@ -474,13 +682,14 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     final state = await _readState();
     if (state['activeProfile'] == id) {
       throw StateError(
-          'Select another profile before deleting the active profile.');
+        'Select another profile before deleting the active profile.',
+      );
     }
     final file = File(_profilePath(id));
     if (await file.exists()) await file.delete();
     final names = Map<String, dynamic>.from(
-        state['profileNames'] is Map ? state['profileNames'] as Map : const {})
-      ..remove(id);
+      state['profileNames'] is Map ? state['profileNames'] as Map : const {},
+    )..remove(id);
     final types = _stateMap(state, 'profileTypes')..remove(id);
     final urls = _stateMap(state, 'profileUrls')..remove(id);
     await _updateState(<String, dynamic>{
@@ -492,11 +701,34 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   @override
-  Future<String> getStartupLog() async {
-    final file = File('$_logsDir\\service.log');
-    return await file.exists()
-        ? file.readAsString()
-        : 'No service log is available.';
+  Future<List<DebugLogFile>> getDebugLogs() async => const <DebugLogFile>[
+        DebugLogFile(
+          id: 'service.log',
+          displayName: 'Mclash.log',
+          description: '服务启动、停止和控制日志',
+        ),
+        DebugLogFile(
+          id: 'mihomo.log',
+          displayName: 'mihomo.log',
+          description: 'mihomo 内核运行日志',
+        ),
+        DebugLogFile(
+          id: 'sing-box.log',
+          displayName: 'sing-box.log',
+          description: 'sing-box 内核运行日志',
+        ),
+      ];
+
+  @override
+  Future<String> getDebugLogContent(String id) async {
+    final logs = await getDebugLogs();
+    if (!logs.any((log) => log.id == id)) {
+      throw ArgumentError.value(id, 'id', 'Unknown debug log');
+    }
+    final file = File('$_logsDir\\$id');
+    if (!await file.exists()) return '暂无日志内容。';
+    final content = await file.readAsString();
+    return content.isEmpty ? '暂无日志内容。' : content;
   }
 
   @override
@@ -513,10 +745,15 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       _updateState(<String, dynamic>{'debugLoggingEnabled': enabled});
   @override
   Future<void> clearDebugLogs() async {
-    for (final name in const <String>['service.log', 'mihomo.log']) {
+    for (final name in const <String>[
+      'service.log',
+      'mihomo.log',
+      'sing-box.log',
+    ]) {
       final file = File('$_logsDir\\$name');
       if (await file.exists()) await file.writeAsString('');
     }
+    await _updateState(<String, dynamic>{'message': ''});
   }
 
   @override
@@ -537,8 +774,10 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   @override
-  Future<CoreUpdateInfo> checkCoreUpdate() async {
-    final result = await _runService('core-update-json');
+  Future<CoreUpdateInfo> checkCoreUpdate(CoreType core) async {
+    final result = await _runService(
+      core == CoreType.mihomo ? 'core-update-json' : 'singbox-update-json',
+    );
     final decoded = jsonDecode(result.stdout.toString().trim());
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Invalid core update response.');
@@ -547,7 +786,9 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   @override
-  Future<void> updateCore() => _runService('update-core').then((_) {});
+  Future<void> updateCore(CoreType core) => _runService(
+        core == CoreType.mihomo ? 'update-core' : 'update-singbox',
+      ).then((_) {});
 
   Uri _subscriptionUri(String value) {
     final uri = Uri.tryParse(value.trim());
@@ -575,8 +816,10 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         final request = await client.getUrl(uri);
         request.followRedirects = true;
         request.maxRedirects = 5;
-        request.headers.set(HttpHeaders.acceptHeader,
-            'application/yaml, text/yaml, text/plain, */*');
+        request.headers.set(
+          HttpHeaders.acceptHeader,
+          'application/yaml, text/yaml, text/plain, */*',
+        );
         request.headers.set(HttpHeaders.userAgentHeader, 'clash.meta');
         final stopwatch = Stopwatch()..start();
         final response = await request.close();
@@ -590,10 +833,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         stopwatch.stop();
         final contentType = response.headers.contentType?.mimeType;
         if (response.statusCode < 200 || response.statusCode >= 300) {
-          throw HttpException(
-            '订阅服务器返回 HTTP ${response.statusCode}。',
-            uri: uri,
-          );
+          throw HttpException('订阅服务器返回 HTTP ${response.statusCode}。', uri: uri);
         }
         String content;
         try {
@@ -606,7 +846,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
           throw StateError('订阅服务器返回了空内容。');
         }
         if (!_looksLikeMihomoConfig(content)) {
-          throw StateError('订阅内容不是 Mihomo/Clash YAML 配置，请检查订阅链接类型。');
+          throw StateError('订阅内容不是 mihomo/Clash YAML 配置，请检查订阅链接类型。');
         }
         return _SubscriptionDownload(
           content: content,
@@ -721,7 +961,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         statusCode: result.statusCode,
         contentLength: result.contentLength,
         contentType: result.contentType,
-        message: '订阅链接有效，内容为 Mihomo/Clash YAML 配置。',
+        message: '订阅链接有效，内容为 mihomo/Clash YAML 配置。',
       );
     } catch (error) {
       return SubscriptionUrlTestResult(
