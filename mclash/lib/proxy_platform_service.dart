@@ -5,6 +5,9 @@ abstract interface class ProxyPlatformService {
   Future<void> start();
   Future<void> stop();
   Future<void> restart();
+  Future<void> syncSystemProxy();
+  Future<NetworkMode> getNetworkMode();
+  Future<void> setNetworkMode(NetworkMode mode);
   Future<ConfigInfo> getConfigInfo();
   Future<List<ConfigProfile>> getConfigs();
   Future<List<ConfigProfile>> importConfigs();

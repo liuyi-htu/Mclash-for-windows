@@ -28,8 +28,8 @@ Name: "{app}\data\profiles"; Permissions: users-modify
 Name: "{app}\data\logs"; Permissions: users-modify
 
 [Files]
-Source: "..\mclash\build\windows\x64\runner\Release\*"; Excludes: "MclashService.exe,mihomo.exe"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\windows-package\MclashService.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\mclash\build\windows\x64\runner\Release\*"; Excludes: "MclashService.exe,mihomoService.exe,mihomo.exe"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\windows-package\mihomoService.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\windows-package\mihomo.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\windows-package\config.yaml"; DestDir: "{app}\data"; Flags: onlyifdoesntexist
 Source: "..\windows-package\geosite.dat"; DestDir: "{app}\data"; DestName: "GeoSite.dat"; Flags: onlyifdoesntexist
@@ -42,12 +42,12 @@ Name: "{group}\Mclash"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\
 Name: "{autodesktop}\Mclash"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Mclash.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\MclashService.exe"; Parameters: "install --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated
+Filename: "{app}\mihomoService.exe"; Parameters: "install --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Mclash"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{app}\MclashService.exe"; Parameters: "stop --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopMclashService"
-Filename: "{app}\MclashService.exe"; Parameters: "uninstall --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveMclashService"
+Filename: "{app}\mihomoService.exe"; Parameters: "stop --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopMclashService"
+Filename: "{app}\mihomoService.exe"; Parameters: "uninstall --base ""{app}"" --data-dir ""{app}\data"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveMclashService"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\data"

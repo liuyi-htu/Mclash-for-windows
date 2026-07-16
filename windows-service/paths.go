@@ -11,7 +11,7 @@ const (
 	serviceName        = "Mclash"
 	legacyServiceName  = "MclashMihomo"
 	serviceDisplayName = "Mclash Mihomo Service"
-	serviceDescription = "mihomo"
+	serviceDescription = "Mclash"
 )
 
 type appPaths struct {
@@ -52,7 +52,7 @@ func resolvePaths(baseDir, dataDir string) (appPaths, error) {
 	return appPaths{
 		BaseDir:    baseDir,
 		DataDir:    dataDir,
-		ServiceExe: filepath.Join(baseDir, "MclashService.exe"),
+		ServiceExe: filepath.Join(baseDir, "mihomoService.exe"),
 		MihomoExe:  filepath.Join(baseDir, "mihomo.exe"),
 		Config:     filepath.Join(dataDir, "config.yaml"),
 		Profiles:   filepath.Join(dataDir, "profiles"),

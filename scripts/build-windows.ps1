@@ -129,14 +129,15 @@ try {
     $env:CGO_ENABLED = "0"
     go mod tidy
     gofmt -w .
-    go build -trimpath -ldflags="-s -w" -o "$packageDir\MclashService.exe" .
+    go build -trimpath -ldflags="-s -w" -o "$packageDir\mihomoService.exe" .
 }
 finally {
     Pop-Location
 }
 
 $releaseDir = Join-Path $flutterProject "build\windows\x64\runner\Release"
-Copy-Item -LiteralPath (Join-Path $packageDir "MclashService.exe") -Destination $releaseDir -Force
+Remove-Item -LiteralPath (Join-Path $releaseDir "MclashService.exe") -Force -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath (Join-Path $packageDir "mihomoService.exe") -Destination $releaseDir -Force
 Copy-Item -LiteralPath $mihomo -Destination $releaseDir -Force
 
 & $iscc (Join-Path $root "installer\Mclash.iss")

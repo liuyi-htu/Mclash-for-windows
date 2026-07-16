@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:yaml/yaml.dart';
+import 'package:yaml_edit/yaml_edit.dart';
+
 import 'models.dart';
 import 'proxy_platform_service.dart';
 
@@ -18,7 +21,7 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
   String get _statePath => '$_dataDir\\state.json';
   String get _configPath => '$_dataDir\\config.yaml';
   String get _serviceExe =>
-      '${File(Platform.resolvedExecutable).parent.path}\\MclashService.exe';
+      '${File(Platform.resolvedExecutable).parent.path}\\mihomoService.exe';
 
   Future<void> _ensureDirectories() async {
     await Directory(_profilesDir).create(recursive: true);
@@ -51,7 +54,7 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
       if (decoded is Map<String, dynamic>) return decoded;
     } catch (_) {}
     if (!File(_serviceExe).existsSync()) {
-      throw StateError('MclashService.exe was not found next to Mclash.exe.');
+      throw StateError('mihomoService.exe was not found next to Mclash.exe.');
     }
     throw StateError(result.stderr.toString().trim().isEmpty
         ? 'Unable to read the Windows service status.'
@@ -61,7 +64,7 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
   Future<ProcessResult> _runService(String command,
       {bool allowFailure = false}) async {
     if (!await File(_serviceExe).exists()) {
-      throw StateError('MclashService.exe was not found next to Mclash.exe.');
+      throw StateError('mihomoService.exe was not found next to Mclash.exe.');
     }
     final result = await Process.run(
         _serviceExe,
@@ -88,14 +91,157 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
   Future<void> start() async {
     final status = await _status();
     if (status['installed'] != true) await _runService('install');
-    await _runService('start');
+    try {
+      await _runService('start');
+      await syncSystemProxy();
+    } catch (_) {
+      await _setSystemProxyEnabled(false);
+      await _runService('stop', allowFailure: true);
+      rethrow;
+    }
   }
 
   @override
-  Future<void> stop() => _runService('stop').then((_) {});
+  Future<void> stop() async {
+    await _setSystemProxyEnabled(false);
+    await _runService('stop');
+  }
 
   @override
-  Future<void> restart() => _runService('restart').then((_) {});
+  Future<void> restart() async {
+    await _setSystemProxyEnabled(false);
+    await _runService('restart');
+    try {
+      await syncSystemProxy();
+    } catch (_) {
+      await _runService('stop', allowFailure: true);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> syncSystemProxy() async {
+    final shouldEnable =
+        await getNetworkMode() == NetworkMode.proxy && await isRunning();
+    await _setSystemProxyEnabled(shouldEnable);
+  }
+
+  Future<void> _setSystemProxyEnabled(bool enabled) async {
+    if (enabled) {
+      final port = await _systemProxyPort();
+      await _runRegistry(<String>[
+        'add',
+        r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
+        '/v',
+        'ProxyServer',
+        '/t',
+        'REG_SZ',
+        '/d',
+        '127.0.0.1:$port',
+        '/f',
+      ]);
+      await _runRegistry(<String>[
+        'add',
+        r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
+        '/v',
+        'ProxyOverride',
+        '/t',
+        'REG_SZ',
+        '/d',
+        r'<local>;localhost;127.*',
+        '/f',
+      ]);
+    }
+    await _runRegistry(<String>[
+      'add',
+      r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
+      '/v',
+      'ProxyEnable',
+      '/t',
+      'REG_DWORD',
+      '/d',
+      enabled ? '1' : '0',
+      '/f',
+    ]);
+    await _notifySystemProxyChanged();
+  }
+
+  Future<int> _systemProxyPort() async {
+    if (!await File(_configPath).exists()) {
+      throw StateError('Mihomo configuration does not exist.');
+    }
+    final document = loadYaml(await File(_configPath).readAsString());
+    if (document is! YamlMap) {
+      throw const FormatException('Mihomo configuration must be a YAML map.');
+    }
+    for (final key in const <String>['mixed-port', 'port']) {
+      final value = document[key];
+      final port = value is int ? value : int.tryParse(value?.toString() ?? '');
+      if (port != null && port >= 1 && port <= 65535) return port;
+    }
+    throw StateError('代理模式需要在配置中设置 mixed-port 或 port。');
+  }
+
+  Future<void> _runRegistry(List<String> arguments) async {
+    final result = await Process.run('reg.exe', arguments, runInShell: false);
+    if (result.exitCode != 0) {
+      final message = result.stderr.toString().trim();
+      throw StateError(message.isEmpty ? '更新 Windows 系统代理失败。' : message);
+    }
+  }
+
+  Future<void> _notifySystemProxyChanged() async {
+    const script = r'''
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class WinInetProxy {
+  [DllImport("wininet.dll", SetLastError = true)]
+  public static extern bool InternetSetOption(IntPtr hInternet, int option, IntPtr buffer, int length);
+}
+'@
+[WinInetProxy]::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0) | Out-Null
+[WinInetProxy]::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0) | Out-Null
+''';
+    final result = await Process.run(
+      'powershell.exe',
+      const <String>['-NoProfile', '-NonInteractive', '-Command', script],
+      runInShell: false,
+    );
+    if (result.exitCode != 0) {
+      throw StateError('Windows 系统代理已写入，但刷新系统设置失败。');
+    }
+  }
+
+  @override
+  Future<NetworkMode> getNetworkMode() async =>
+      (await _readState())['networkMode'] == 'tun'
+          ? NetworkMode.tun
+          : NetworkMode.proxy;
+
+  @override
+  Future<void> setNetworkMode(NetworkMode mode) async {
+    await _ensureDirectories();
+    final state = await _readState();
+    final active = state['activeProfile']?.toString();
+    File? source;
+    if (active != null) {
+      final profile = File(_profilePath(active));
+      if (await profile.exists()) source = profile;
+    }
+    source ??= await File(_configPath).exists() ? File(_configPath) : null;
+
+    if (source != null) {
+      final content = await source.readAsString();
+      await File(_configPath).writeAsString(
+        _runtimeConfig(content, mode),
+        flush: true,
+      );
+    }
+    await _updateState(<String, dynamic>{
+      'networkMode': mode == NetworkMode.tun ? 'tun' : 'proxy',
+    });
+  }
 
   @override
   Future<ConfigInfo> getConfigInfo() async {
@@ -236,14 +382,56 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     return result;
   }
 
+  String _runtimeConfig(String content, NetworkMode mode) {
+    final secured = _secureController(content);
+    final document = loadYaml(secured);
+    if (document is! YamlMap) {
+      throw const FormatException('Mihomo configuration must be a YAML map.');
+    }
+
+    final editor = YamlEditor(secured);
+    final enabled = mode == NetworkMode.tun;
+    final tun = document['tun'];
+    if (tun is YamlMap) {
+      editor.update(<Object>['tun', 'enable'], enabled);
+      if (enabled) {
+        if (!tun.containsKey('stack')) {
+          editor.update(<Object>['tun', 'stack'], 'mixed');
+        }
+        if (!tun.containsKey('auto-route')) {
+          editor.update(<Object>['tun', 'auto-route'], true);
+        }
+        if (!tun.containsKey('auto-detect-interface')) {
+          editor.update(<Object>['tun', 'auto-detect-interface'], true);
+        }
+      }
+    } else {
+      editor.update(<Object>[
+        'tun'
+      ], <String, dynamic>{
+        'enable': enabled,
+        if (enabled) ...<String, dynamic>{
+          'stack': 'mixed',
+          'auto-route': true,
+          'auto-detect-interface': true,
+        },
+      });
+    }
+    return '${editor.toString().trimRight()}\n';
+  }
+
+  Future<String> _runtimeConfigForCurrentMode(String content) async =>
+      _runtimeConfig(content, await getNetworkMode());
+
   @override
   Future<ConfigInfo> selectConfig(String id) async {
     final source = File(_profilePath(id));
     if (!await source.exists()) {
       throw StateError('The selected profile no longer exists.');
     }
-    await File(_configPath)
-        .writeAsString(_secureController(await source.readAsString()));
+    await File(_configPath).writeAsString(
+      await _runtimeConfigForCurrentMode(await source.readAsString()),
+    );
     await _updateState(<String, dynamic>{'activeProfile': id});
     return getConfigInfo();
   }
@@ -261,7 +449,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     await File(_profilePath(id)).writeAsString(content);
     final state = await _readState();
     if (state['activeProfile'] == id) {
-      await File(_configPath).writeAsString(_secureController(content));
+      await File(_configPath)
+          .writeAsString(await _runtimeConfigForCurrentMode(content));
     }
     return getConfigs();
   }
@@ -492,8 +681,10 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       'profileUrls': urls,
     });
     if (state['activeProfile'] == id) {
-      await File(_configPath)
-          .writeAsString(_secureController(download.content), flush: true);
+      await File(_configPath).writeAsString(
+        await _runtimeConfigForCurrentMode(download.content),
+        flush: true,
+      );
     }
     return getConfigs();
   }
@@ -509,8 +700,10 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     final download = await _downloadSubscription(url);
     await _writeSubscription(id, download.content);
     if (state['activeProfile'] == id) {
-      await File(_configPath)
-          .writeAsString(_secureController(download.content), flush: true);
+      await File(_configPath).writeAsString(
+        await _runtimeConfigForCurrentMode(download.content),
+        flush: true,
+      );
     }
     return getConfigs();
   }

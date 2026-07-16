@@ -17,6 +17,13 @@ class NativeProxyService implements ProxyPlatformService {
   @override
   Future<void> restart() => _delegate.restart();
   @override
+  Future<void> syncSystemProxy() => _delegate.syncSystemProxy();
+  @override
+  Future<NetworkMode> getNetworkMode() => _delegate.getNetworkMode();
+  @override
+  Future<void> setNetworkMode(NetworkMode mode) =>
+      _delegate.setNetworkMode(mode);
+  @override
   Future<ConfigInfo> getConfigInfo() => _delegate.getConfigInfo();
   @override
   Future<List<ConfigProfile>> getConfigs() => _delegate.getConfigs();

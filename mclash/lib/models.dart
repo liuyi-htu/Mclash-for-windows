@@ -1,5 +1,7 @@
 enum ProxyStatus { stopped, starting, running, stopping }
 
+enum NetworkMode { proxy, tun }
+
 class CoreUpdateInfo {
   const CoreUpdateInfo({
     required this.currentVersion,

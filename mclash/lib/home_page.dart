@@ -8,7 +8,7 @@ import 'config_page.dart';
 import 'models.dart';
 import 'native_proxy_service.dart';
 
-enum _HomeMenuAction { config, generalSettings }
+enum _HomeMenuAction { switchMode, config, generalSettings }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -24,6 +24,8 @@ class _HomePageState extends State<HomePage> {
   ConfigInfo _config = const ConfigInfo(exists: false);
   bool _debugLoggingEnabled = false;
   bool _serviceAutoStartEnabled = false;
+  NetworkMode _networkMode = NetworkMode.proxy;
+  bool _switchingMode = false;
   Timer? _statusTimer;
 
   @override
@@ -48,7 +50,10 @@ class _HomePageState extends State<HomePage> {
         return;
       }
       final next = running ? ProxyStatus.running : ProxyStatus.stopped;
-      if (_status != next) setState(() => _status = next);
+      if (_status != next) {
+        if (!running) await _service.syncSystemProxy();
+        if (mounted) setState(() => _status = next);
+      }
     } catch (_) {
       // Transient SCM/controller failures are reported by explicit actions.
     }
@@ -200,12 +205,15 @@ class _HomePageState extends State<HomePage> {
       final debugLoggingEnabled = await _service.getDebugLoggingEnabled();
       final serviceAutoStartEnabled =
           await _service.getServiceAutoStartEnabled();
+      final networkMode = await _service.getNetworkMode();
+      await _service.syncSystemProxy();
       if (!mounted) return;
       setState(() {
         _config = config;
         _status = running ? ProxyStatus.running : ProxyStatus.stopped;
         _debugLoggingEnabled = debugLoggingEnabled;
         _serviceAutoStartEnabled = serviceAutoStartEnabled;
+        _networkMode = networkMode;
       });
     } catch (error) {
       if (!mounted) return;
@@ -238,12 +246,52 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _handleMenuAction(_HomeMenuAction action) async {
     switch (action) {
+      case _HomeMenuAction.switchMode:
+        await _switchNetworkMode();
+        return;
       case _HomeMenuAction.config:
         await _openConfigPage();
         return;
       case _HomeMenuAction.generalSettings:
         await _showGeneralSettings();
         return;
+    }
+  }
+
+  Future<void> _switchNetworkMode() async {
+    if (_switchingMode ||
+        _status == ProxyStatus.starting ||
+        _status == ProxyStatus.stopping) {
+      return;
+    }
+    final target =
+        _networkMode == NetworkMode.proxy ? NetworkMode.tun : NetworkMode.proxy;
+    final wasRunning = _status == ProxyStatus.running;
+    setState(() => _switchingMode = true);
+    try {
+      await _service.setNetworkMode(target);
+      if (wasRunning) {
+        await _service.restart();
+      } else {
+        await _service.syncSystemProxy();
+      }
+      if (!mounted) return;
+      setState(() {
+        _networkMode = target;
+        _switchingMode = false;
+        _status = wasRunning ? ProxyStatus.running : _status;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            target == NetworkMode.tun ? '已切换到 TUN 模式' : '已切换到代理模式',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _switchingMode = false);
+      _showError('切换模式失败：$error');
     }
   }
 
@@ -470,7 +518,8 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('Telegram group', style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text('Telegram group',
+                style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
             const SelectableText('https://telegram.me/+QqTdo3bY8eAyZmFl'),
           ],
@@ -677,10 +726,12 @@ class _HomePageState extends State<HomePage> {
     required _HomeMenuAction value,
     required IconData icon,
     required String title,
+    bool enabled = true,
   }) {
     final colors = Theme.of(context).colorScheme;
     return PopupMenuItem<_HomeMenuAction>(
       value: value,
+      enabled: enabled,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       child: Container(
         constraints: const BoxConstraints(minWidth: 250),
@@ -753,6 +804,18 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               itemBuilder: (context) => [
+                _menuItem(
+                  value: _HomeMenuAction.switchMode,
+                  icon: _networkMode == NetworkMode.proxy
+                      ? Icons.vpn_lock_outlined
+                      : Icons.language_outlined,
+                  title: _switchingMode
+                      ? '正在切换模式'
+                      : _networkMode == NetworkMode.proxy
+                          ? '切换 TUN 模式'
+                          : '切换代理模式',
+                  enabled: !_switchingMode && !busy,
+                ),
                 _menuItem(
                   value: _HomeMenuAction.config,
                   icon: Icons.description_outlined,

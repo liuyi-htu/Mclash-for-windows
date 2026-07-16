@@ -132,15 +132,15 @@ func contains(args []string, wanted string) bool {
 }
 
 func fail(err error) int {
-	fmt.Fprintln(os.Stderr, "MclashService:", err)
+	fmt.Fprintln(os.Stderr, "mihomoService:", err)
 	return 1
 }
 
 func printHelp() {
-	fmt.Println(`MclashService manages the Mclash Mihomo Windows service.
+	fmt.Println(`mihomoService manages the Mclash Mihomo Windows service.
 
 Usage:
-  MclashService.exe <command> [--base <directory>] [--data-dir <directory>]
+  mihomoService.exe <command> [--base <directory>] [--data-dir <directory>]
 
 Commands:
   install uninstall start stop restart status status-json
