@@ -118,7 +118,7 @@ func startService(paths appPaths) error {
 	if err := paths.ensureDataDirs(); err != nil {
 		return err
 	}
-	if err := validateMihomoConfig(paths); err != nil {
+	if err := validateSelectedConfig(paths); err != nil {
 		return err
 	}
 	manager, service, err := openService()

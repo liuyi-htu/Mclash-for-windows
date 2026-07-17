@@ -289,23 +289,46 @@ public static class WinInetProxy {
           ? CoreType.singBox
           : CoreType.mihomo;
 
+  bool _profileMatchesCore(String? id, CoreType core) {
+    if (id == null || id.isEmpty) return false;
+    return core == CoreType.singBox
+        ? id.toLowerCase().endsWith('.json')
+        : RegExp(r'\.(yaml|yml)$', caseSensitive: false).hasMatch(id);
+  }
+
+  String _activeProfileKey(CoreType core) => core == CoreType.singBox
+      ? 'activeSingBoxProfile'
+      : 'activeMihomoProfile';
+
   @override
   Future<void> setCoreType(CoreType core) async {
     final state = await _readState();
-    final activeKey = core == CoreType.singBox
-        ? 'activeSingBoxProfile'
-        : 'activeMihomoProfile';
+    final currentCore = state['coreType'] == 'sing-box'
+        ? CoreType.singBox
+        : CoreType.mihomo;
     final currentActive = state['activeProfile']?.toString();
-    final currentMatchesCore = currentActive != null &&
-        (core == CoreType.singBox
-            ? currentActive.toLowerCase().endsWith('.json')
-            : RegExp(r'\.(yaml|yml)$', caseSensitive: false)
-                .hasMatch(currentActive));
-    await _updateState(<String, dynamic>{
+    final currentActiveKey = _activeProfileKey(currentCore);
+    final targetActiveKey = _activeProfileKey(core);
+    final rememberedTarget = state[targetActiveKey]?.toString();
+
+    // Preserve the selected profile when only switching TUN/system proxy.
+    // When switching cores, remember the current core's profile and restore
+    // the last profile used by the target core.
+    final targetActive =
+        currentCore == core && _profileMatchesCore(currentActive, core)
+            ? currentActive
+            : _profileMatchesCore(rememberedTarget, core)
+                ? rememberedTarget
+                : null;
+
+    final changes = <String, dynamic>{
       'coreType': core == CoreType.singBox ? 'sing-box' : 'mihomo',
-      'activeProfile':
-          state[activeKey] ?? (currentMatchesCore ? currentActive : null),
-    });
+      'activeProfile': targetActive,
+    };
+    if (_profileMatchesCore(currentActive, currentCore)) {
+      changes[currentActiveKey] = currentActive;
+    }
+    await _updateState(changes);
   }
 
   @override
@@ -321,7 +344,10 @@ public static class WinInetProxy {
         names is Map && active != null ? names[active]?.toString() : null;
     return ConfigInfo(
       exists: exists,
-      fileName: displayName ?? (exists ? 'config.yaml' : null),
+      fileName: displayName ??
+          (exists
+              ? (core == CoreType.singBox ? 'sing-box.json' : 'config.yaml')
+              : null),
     );
   }
 
@@ -717,6 +743,11 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
           displayName: 'sing-box.log',
           description: 'sing-box 内核运行日志',
         ),
+        DebugLogFile(
+          id: 'update.log',
+          displayName: 'update.log',
+          description: 'mihomo/sing-box 内核检测与更新日志',
+        ),
       ];
 
   @override
@@ -749,6 +780,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       'service.log',
       'mihomo.log',
       'sing-box.log',
+      'update.log',
     ]) {
       final file = File('$_logsDir\\$name');
       if (await file.exists()) await file.writeAsString('');

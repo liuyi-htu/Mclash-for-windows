@@ -77,31 +77,63 @@ func run(args []string) int {
 	case "disable-autostart":
 		err = setServiceAutoStart(false)
 	case "core-update-json":
+		appendUpdateLog(paths, "[mihomo] 开始检测内核更新")
 		info, _, updateErr := checkCoreUpdate(paths)
 		if updateErr != nil {
+			appendUpdateLog(paths, "[mihomo] 检测更新失败：%v", updateErr)
 			return fail(updateErr)
 		}
+		appendUpdateLog(
+			paths,
+			"[mihomo] 检测完成：当前=%s，官方=%s，可更新=%t",
+			info.CurrentVersion,
+			info.LatestVersion,
+			info.UpdateAvailable,
+		)
 		data, marshalErr := json.Marshal(info)
 		if marshalErr != nil {
+			appendUpdateLog(paths, "[mihomo] 生成检测结果失败：%v", marshalErr)
 			return fail(marshalErr)
 		}
 		fmt.Println(string(data))
 		return 0
 	case "singbox-update-json":
+		appendUpdateLog(paths, "[sing-box] 开始检测内核更新")
 		info, _, updateErr := checkSingBoxUpdate(paths)
 		if updateErr != nil {
+			appendUpdateLog(paths, "[sing-box] 检测更新失败：%v", updateErr)
 			return fail(updateErr)
 		}
+		appendUpdateLog(
+			paths,
+			"[sing-box] 检测完成：当前=%s，官方=%s，可更新=%t",
+			info.CurrentVersion,
+			info.LatestVersion,
+			info.UpdateAvailable,
+		)
 		data, marshalErr := json.Marshal(info)
 		if marshalErr != nil {
+			appendUpdateLog(paths, "[sing-box] 生成检测结果失败：%v", marshalErr)
 			return fail(marshalErr)
 		}
 		fmt.Println(string(data))
 		return 0
 	case "update-core":
+		appendUpdateLog(paths, "[mihomo] 开始更新内核")
 		err = updateCore(paths)
+		if err != nil {
+			appendUpdateLog(paths, "[mihomo] 更新失败：%v", err)
+		} else {
+			appendUpdateLog(paths, "[mihomo] 更新完成")
+		}
 	case "update-singbox":
+		appendUpdateLog(paths, "[sing-box] 开始更新内核")
 		err = updateSingBox(paths)
+		if err != nil {
+			appendUpdateLog(paths, "[sing-box] 更新失败：%v", err)
+		} else {
+			appendUpdateLog(paths, "[sing-box] 更新完成")
+		}
 	case "run-service":
 		err = svc.Run(serviceName, &serviceHandler{paths: paths})
 	default:

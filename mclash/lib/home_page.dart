@@ -769,9 +769,12 @@ class _HomePageState extends State<HomePage> {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(
-                      log.id == 'mihomo.log'
-                          ? Icons.memory_rounded
-                          : Icons.settings_applications_outlined,
+                      log.id == 'update.log'
+                          ? Icons.system_update_alt_rounded
+                          : log.id == 'mihomo.log' ||
+                                  log.id == 'sing-box.log'
+                              ? Icons.memory_rounded
+                              : Icons.settings_applications_outlined,
                     ),
                     title: Text(log.displayName),
                     subtitle: Text(log.description),
@@ -808,7 +811,7 @@ class _HomePageState extends State<HomePage> {
           builder: (dialogContext) => AlertDialog(
             title: const Text('清除调试日志'),
             content: const Text(
-              '将清空 App 启动日志、mihomo 日志和最近一次启动错误。'
+              '将清空服务日志、mihomo 日志、sing-box 日志和内核更新日志。'
               '此操作不会删除配置文件。',
             ),
             actions: [
@@ -1051,12 +1054,28 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  Text(
-                    _statusText,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 25,
-                      fontWeight: FontWeight.w800,
+                  Container(
+                    padding: running
+                        ? const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          )
+                        : EdgeInsets.zero,
+                    decoration: running
+                        ? BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                          )
+                        : null,
+                    child: Text(
+                      _statusText,
+                      style: TextStyle(
+                        color: running
+                            ? const Color(0xFF16A34A)
+                            : Colors.white,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),

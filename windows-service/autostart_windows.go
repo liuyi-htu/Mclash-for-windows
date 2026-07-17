@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"syscall"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -14,16 +15,28 @@ type autoStartResult struct {
 }
 
 func queryServiceAutoStart() autoStartResult {
-	manager, err := mgr.Connect()
+	managerHandle, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
 		return autoStartResult{}
 	}
+	manager := &mgr.Mgr{Handle: managerHandle}
 	defer manager.Disconnect()
-	service, err := manager.OpenService(serviceName)
+
+	serviceNamePtr, err := syscall.UTF16PtrFromString(serviceName)
 	if err != nil {
 		return autoStartResult{}
 	}
+	serviceHandle, err := windows.OpenService(
+		manager.Handle,
+		serviceNamePtr,
+		windows.SERVICE_QUERY_CONFIG,
+	)
+	if err != nil {
+		return autoStartResult{}
+	}
+	service := &mgr.Service{Name: serviceName, Handle: serviceHandle}
 	defer service.Close()
+
 	config, err := service.Config()
 	if err != nil {
 		return autoStartResult{Installed: true}
