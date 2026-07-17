@@ -897,9 +897,7 @@ class _HomePageState extends State<HomePage> {
   String get _statusText => switch (_status) {
         ProxyStatus.stopped => '未启动',
         ProxyStatus.starting => '正在启动',
-        ProxyStatus.running =>
-          '${_coreType == CoreType.mihomo ? 'mihomo' : 'sing-box'} + '
-              '${_networkMode == NetworkMode.proxy ? '系统代理' : 'TUN'}',
+        ProxyStatus.running => '运行中',
         ProxyStatus.stopping => '正在停止',
       };
 
@@ -1061,7 +1059,7 @@ class _HomePageState extends State<HomePage> {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: running ? const Color(0xFF16A34A) : Colors.white,
-                      fontSize: 17,
+                      fontSize: 25,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
