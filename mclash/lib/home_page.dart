@@ -1061,7 +1061,7 @@ class _HomePageState extends State<HomePage> {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: running ? const Color(0xFF16A34A) : Colors.white,
-                      fontSize: 14,
+                      fontSize: 17,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
