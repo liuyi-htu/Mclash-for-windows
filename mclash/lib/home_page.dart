@@ -1058,7 +1058,7 @@ class _HomePageState extends State<HomePage> {
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: running ? const Color(0xFF16A34A) : Colors.white,
+                      color: Colors.white,
                       fontSize: 25,
                       fontWeight: FontWeight.w800,
                     ),
