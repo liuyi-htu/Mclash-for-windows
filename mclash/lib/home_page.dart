@@ -1055,27 +1055,15 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 18),
                   Container(
-                    padding: running
-                        ? const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          )
-                        : EdgeInsets.zero,
-                    decoration: running
-                        ? BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                          )
-                        : null,
-                    child: Text(
-                      _statusText,
-                      style: TextStyle(
-                        color: running
-                            ? const Color(0xFF16A34A)
-                            : Colors.white,
-                        fontSize: 25,
-                        fontWeight: FontWeight.w800,
-                      ),
+                  Text(
+                    _statusText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: running ? const Color(0xFF16A34A) : Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                   const SizedBox(height: 8),
