@@ -1054,7 +1054,6 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  Container(
                   Text(
                     _statusText,
                     maxLines: 1,
