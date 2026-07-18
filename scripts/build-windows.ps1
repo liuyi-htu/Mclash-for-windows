@@ -7,6 +7,14 @@ $packageDir = Join-Path $root "windows-package"
 $mihomo = Join-Path $packageDir "mihomo.exe"
 $singBox = Join-Path $packageDir "sing-box.exe"
 $ruleSetDir = Join-Path $packageDir "rulesets"
+$releaseVersion = if ($env:MCLASH_VERSION) {
+    $env:MCLASH_VERSION.Trim()
+} else {
+    "1.0.2"
+}
+if ($releaseVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw "MCLASH_VERSION must use the x.y.z format without a v prefix."
+}
 $isccCandidates = @(
     (Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1),
     (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
@@ -202,9 +210,9 @@ Copy-Item -LiteralPath (Join-Path $packageDir "MclashService.exe") -Destination 
 Copy-Item -LiteralPath $mihomo -Destination $releaseDir -Force
 Copy-Item -LiteralPath $singBox -Destination $releaseDir -Force
 
-& $iscc (Join-Path $root "installer\Mclash.iss")
+& $iscc "/DMyAppVersion=$releaseVersion" (Join-Path $root "installer\Mclash.iss")
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup failed with exit code $LASTEXITCODE."
 }
-$installer = Join-Path $root "installer\Output\Mclash-Windows-Setup-1.0.2.exe"
+$installer = Join-Path $root "installer\Output\Mclash-Windows-Setup-$releaseVersion.exe"
 Write-Host "Windows installer: $installer"
