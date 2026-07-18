@@ -53,6 +53,9 @@ var updateHTTPClient = func() *http.Client {
 }()
 
 func appendUpdateLog(paths appPaths, format string, args ...any) {
+	if !debugLoggingEnabled(paths) {
+		return
+	}
 	if err := paths.ensureDataDirs(); err != nil {
 		return
 	}
@@ -99,15 +102,17 @@ func checkCoreUpdate(paths appPaths) (coreUpdateInfo, githubRelease, error) {
 }
 
 func updateCore(paths appPaths) error {
-	status := queryStatus(paths)
-	if status.State == "running" || status.State == "start_pending" || status.State == "stop_pending" {
-		return fmt.Errorf("stop the Mclash service before updating mihomo")
-	}
 	info, release, err := checkCoreUpdate(paths)
 	if err != nil {
 		return err
 	}
 	if !info.UpdateAvailable {
+		appendUpdateLog(
+			paths,
+			"[mihomo] 当前内核已是官方最新版，无需更新：当前=%s，官方=%s",
+			info.CurrentVersion,
+			info.LatestVersion,
+		)
 		return nil
 	}
 	wantedName := "mihomo-windows-amd64-compatible-v" + info.LatestVersion + ".zip"
@@ -142,33 +147,12 @@ func updateCore(paths appPaths) error {
 		return err
 	}
 	temporary := paths.MihomoExe + ".update"
-	backup := paths.MihomoExe + ".backup"
 	_ = os.Remove(temporary)
-	_ = os.Remove(backup)
 	if err := os.WriteFile(temporary, binary, 0o755); err != nil {
 		return fmt.Errorf("write updated mihomo: %w", err)
 	}
 	defer os.Remove(temporary)
-	if err := os.Rename(paths.MihomoExe, backup); err != nil {
-		return fmt.Errorf("back up current mihomo: %w", err)
-	}
-	restore := true
-	defer func() {
-		if restore {
-			_ = os.Remove(paths.MihomoExe)
-			_ = os.Rename(backup, paths.MihomoExe)
-		}
-	}()
-	if err := os.Rename(temporary, paths.MihomoExe); err != nil {
-		return fmt.Errorf("activate updated mihomo: %w", err)
-	}
-	installed, err := readMihomoVersion(paths.MihomoExe)
-	if err != nil || installed != info.LatestVersion {
-		return fmt.Errorf("updated mihomo failed version verification: got %q: %v", installed, err)
-	}
-	restore = false
-	_ = os.Remove(backup)
-	return nil
+	return activateCoreUpdate(paths, "mihomo", paths.MihomoExe, temporary, info.LatestVersion, readMihomoVersion)
 }
 
 func checkSingBoxUpdate(paths appPaths) (coreUpdateInfo, githubRelease, error) {
@@ -192,15 +176,17 @@ func checkSingBoxUpdate(paths appPaths) (coreUpdateInfo, githubRelease, error) {
 }
 
 func updateSingBox(paths appPaths) error {
-	status := queryStatus(paths)
-	if status.State == "running" || status.State == "start_pending" || status.State == "stop_pending" {
-		return fmt.Errorf("stop the Mclash service before updating sing-box")
-	}
 	info, release, err := checkSingBoxUpdate(paths)
 	if err != nil {
 		return err
 	}
 	if !info.UpdateAvailable {
+		appendUpdateLog(
+			paths,
+			"[sing-box] 当前内核已是官方最新版，无需更新：当前=%s，官方=%s",
+			info.CurrentVersion,
+			info.LatestVersion,
+		)
 		return nil
 	}
 	wantedName := "sing-box-" + info.LatestVersion + "-windows-amd64.zip"
@@ -233,27 +219,94 @@ func updateSingBox(paths appPaths) error {
 	if err != nil {
 		return err
 	}
-	temporary, backup := paths.SingBoxExe+".update", paths.SingBoxExe+".backup"
+	temporary := paths.SingBoxExe + ".update"
 	_ = os.Remove(temporary)
-	_ = os.Remove(backup)
 	if err := os.WriteFile(temporary, binary, 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(paths.SingBoxExe, backup); err != nil {
-		return err
+	defer os.Remove(temporary)
+	return activateCoreUpdate(
+		paths,
+		"sing-box",
+		paths.SingBoxExe,
+		temporary,
+		info.LatestVersion,
+		func(path string) (string, error) { return readCoreVersion(path, "version") },
+	)
+}
+
+var (
+	queryServiceStatus = queryStatus
+	stopProxyService   = stopService
+	startProxyService  = startService
+)
+
+// activateCoreUpdate is called only after the update has been fully downloaded,
+// verified, extracted, and written to temporary. This keeps the proxy online
+// during the slow network operation and limits downtime to the file swap.
+func activateCoreUpdate(
+	paths appPaths,
+	name, target, temporary, latestVersion string,
+	readVersion func(string) (string, error),
+) error {
+	status := queryServiceStatus(paths)
+	if status.State == "start_pending" || status.State == "stop_pending" {
+		return fmt.Errorf("cannot update %s while the Mclash service is changing state", name)
 	}
-	if err := os.Rename(temporary, paths.SingBoxExe); err != nil {
-		_ = os.Rename(backup, paths.SingBoxExe)
-		return err
+	wasRunning := status.State == "running"
+	if wasRunning {
+		appendUpdateLog(paths, "[%s] 下载及校验完成，正在停止代理", name)
+		if err := stopProxyService(); err != nil {
+			return fmt.Errorf("stop proxy before replacing %s: %w", name, err)
+		}
 	}
-	installed, err := readCoreVersion(paths.SingBoxExe, "version")
-	if err != nil || installed != info.LatestVersion {
-		_ = os.Remove(paths.SingBoxExe)
-		_ = os.Rename(backup, paths.SingBoxExe)
-		return fmt.Errorf("updated sing-box verification failed")
+
+	backup := target + ".backup"
+	_ = os.Remove(backup)
+	if err := os.Rename(target, backup); err != nil {
+		return restartAfterUpdateFailure(paths, name, wasRunning, fmt.Errorf("back up current %s: %w", name, err))
+	}
+	if err := os.Rename(temporary, target); err != nil {
+		_ = os.Rename(backup, target)
+		return restartAfterUpdateFailure(paths, name, wasRunning, fmt.Errorf("activate updated %s: %w", name, err))
+	}
+
+	installed, verifyErr := readVersion(target)
+	if verifyErr != nil || installed != latestVersion {
+		_ = os.Remove(target)
+		_ = os.Rename(backup, target)
+		return restartAfterUpdateFailure(
+			paths,
+			name,
+			wasRunning,
+			fmt.Errorf("updated %s failed version verification: got %q: %v", name, installed, verifyErr),
+		)
+	}
+
+	if wasRunning {
+		appendUpdateLog(paths, "[%s] 内核替换完成，正在重启代理", name)
+		if err := startProxyService(paths); err != nil {
+			_ = os.Remove(target)
+			_ = os.Rename(backup, target)
+			restartErr := startProxyService(paths)
+			if restartErr != nil {
+				return fmt.Errorf("start proxy with updated %s: %w; rolled back but failed to restart old core: %v", name, err, restartErr)
+			}
+			return fmt.Errorf("start proxy with updated %s: %w; rolled back to the previous core", name, err)
+		}
 	}
 	_ = os.Remove(backup)
 	return nil
+}
+
+func restartAfterUpdateFailure(paths appPaths, name string, wasRunning bool, updateErr error) error {
+	if !wasRunning {
+		return updateErr
+	}
+	if err := startProxyService(paths); err != nil {
+		return fmt.Errorf("%w; also failed to restart proxy with the previous %s core: %v", updateErr, name, err)
+	}
+	return updateErr
 }
 
 func readCoreVersion(path string, argument string) (string, error) {

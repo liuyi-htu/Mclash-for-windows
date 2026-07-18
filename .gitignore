@@ -25,3 +25,4 @@ windows-package/MclashService.exe
 windows-package/mihomo.exe
 windows-package/*.dat
 windows-package/*.mmdb
+windows-package/rulesets/

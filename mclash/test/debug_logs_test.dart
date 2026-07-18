@@ -19,8 +19,12 @@ void main() {
 
   test('lists and reads each supported log independently', () async {
     final logs = await service.getDebugLogs();
-    expect(logs.map((log) => log.id),
-        <String>['service.log', 'mihomo.log', 'sing-box.log']);
+    expect(logs.map((log) => log.id), <String>[
+      'service.log',
+      'mihomo.log',
+      'sing-box.log',
+      'update.log',
+    ]);
     expect(logs.first.displayName, 'Mclash.log');
 
     final directory = Directory('${temporaryDirectory.path}\\logs');
@@ -41,6 +45,7 @@ void main() {
         '${directory.path}\\service.log',
       ).writeAsString('service entry');
       await File('${directory.path}\\mihomo.log').writeAsString('mihomo entry');
+      await File('${directory.path}\\update.log').writeAsString('update entry');
       await File('${temporaryDirectory.path}\\state.json').writeAsString(
         jsonEncode(<String, dynamic>{'message': 'startup failed'}),
       );
@@ -59,11 +64,17 @@ void main() {
         await File('${directory.path}\\mihomo.log').readAsString(),
         isEmpty,
       );
-      final state = jsonDecode(
-        await File(
-          '${temporaryDirectory.path}\\state.json',
-        ).readAsString(),
-      ) as Map<String, dynamic>;
+      expect(
+        await File('${directory.path}\\update.log').readAsString(),
+        isEmpty,
+      );
+      final state =
+          jsonDecode(
+                await File(
+                  '${temporaryDirectory.path}\\state.json',
+                ).readAsString(),
+              )
+              as Map<String, dynamic>;
       expect(state['message'], isEmpty);
     },
   );

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
 import 'models.dart';
 import 'native_proxy_service.dart';
 
@@ -65,9 +66,7 @@ class _ConfigEditorPageState extends State<ConfigEditorPage> {
       );
       if (!mounted) return;
       setState(() => _dirty = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('配置内容已保存')));
+      AppNotice.show(context, '配置内容已保存');
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = error.toString());

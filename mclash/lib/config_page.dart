@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
 import 'models.dart';
 import 'native_proxy_service.dart';
 import 'config_editor_page.dart';
@@ -69,9 +70,20 @@ class _ConfigPageState extends State<ConfigPage> {
   Future<void> _importLocal() async {
     try {
       setState(() => _working = true);
+      String? previousActiveId;
+      for (final profile in _profiles) {
+        if (profile.active) previousActiveId = profile.id;
+      }
       final profiles = await _service.importConfigs();
       if (!mounted) return;
       setState(() => _profiles = profiles);
+      String? activeId;
+      for (final profile in profiles) {
+        if (profile.active) activeId = profile.id;
+      }
+      if (activeId != null && activeId != previousActiveId) {
+        AppNotice.show(context, '配置已导入并自动选中');
+      }
     } catch (error) {
       if (!mounted) return;
       if (!error.toString().contains('未选择配置文件')) {
@@ -89,7 +101,8 @@ class _ConfigPageState extends State<ConfigPage> {
     final urlController = TextEditingController(text: existing?.url ?? '');
     String? validationMessage;
 
-    final save = await showDialog<bool>(
+    final save =
+        await showDialog<bool>(
           context: context,
           barrierDismissible: !_working,
           builder: (dialogContext) => StatefulBuilder(
@@ -179,9 +192,7 @@ class _ConfigPageState extends State<ConfigPage> {
             );
       if (!mounted) return;
       setState(() => _profiles = profiles);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(existing == null ? '订阅已添加' : '订阅已修改并更新')),
-      );
+      AppNotice.show(context, existing == null ? '订阅已添加' : '订阅已修改并更新');
     } catch (error) {
       if (!mounted) return;
       _showError(error);
@@ -211,9 +222,7 @@ class _ConfigPageState extends State<ConfigPage> {
       final profiles = await _service.refreshSubscription(profile.id);
       if (!mounted) return;
       setState(() => _profiles = profiles);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('“${profile.name}”已更新')));
+      AppNotice.show(context, '“${profile.name}”已更新');
     } catch (error) {
       if (!mounted) return;
       _showError(error);
@@ -224,7 +233,8 @@ class _ConfigPageState extends State<ConfigPage> {
 
   Future<void> _delete(ConfigProfile profile) async {
     if (!_ensureStopped()) return;
-    final confirmed = await showDialog<bool>(
+    final confirmed =
+        await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: const Text('删除配置'),
@@ -362,7 +372,8 @@ class _ConfigPageState extends State<ConfigPage> {
     final controller = TextEditingController(text: profile.name);
     String? validationMessage;
 
-    final shouldSave = await showDialog<bool>(
+    final shouldSave =
+        await showDialog<bool>(
           context: context,
           builder: (dialogContext) => StatefulBuilder(
             builder: (dialogContext, setDialogState) => AlertDialog(
@@ -563,9 +574,7 @@ class _ConfigPageState extends State<ConfigPage> {
   }
 
   void _showError(Object error) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(error.toString())));
+    AppNotice.show(context, error.toString(), error: true);
   }
 
   @override
@@ -579,8 +588,8 @@ class _ConfigPageState extends State<ConfigPage> {
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: PopupMenuButton<_AddConfigAction>(
-              enabled: !_working,
-              tooltip: '添加配置',
+              enabled: !_working && !widget.proxyRunning,
+              tooltip: widget.proxyRunning ? '请先停止代理' : '添加配置',
               onSelected: _handleAdd,
               icon: Container(
                 width: 42,
@@ -828,18 +837,18 @@ class _ConfigPageState extends State<ConfigPage> {
                                                 ),
                                                 if (profile.active)
                                                   Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                      horizontal: 9,
-                                                      vertical: 4,
-                                                    ),
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 9,
+                                                          vertical: 4,
+                                                        ),
                                                     decoration: BoxDecoration(
                                                       color: colors
                                                           .primaryContainer,
                                                       borderRadius:
                                                           BorderRadius.circular(
-                                                        20,
-                                                      ),
+                                                            20,
+                                                          ),
                                                     ),
                                                     child: Text(
                                                       '当前',
@@ -858,11 +867,11 @@ class _ConfigPageState extends State<ConfigPage> {
                                             Text(
                                               widget.proxyRunning
                                                   ? (profile.isSubscription
-                                                      ? '机场订阅 · 点击查看'
-                                                      : '本地 YAML · 点击查看')
+                                                        ? '机场订阅 · 点击查看'
+                                                        : '本地 YAML · 点击查看')
                                                   : (profile.isSubscription
-                                                      ? '机场订阅 · 长按管理'
-                                                      : '本地 YAML · 长按管理'),
+                                                        ? '机场订阅 · 长按管理'
+                                                        : '本地 YAML · 长按管理'),
                                               style: TextStyle(
                                                 color: colors.onSurfaceVariant,
                                                 fontSize: 13,

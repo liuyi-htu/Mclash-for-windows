@@ -58,25 +58,26 @@ func startSelectedCore(paths appPaths) (*mihomoProcess, error) {
 }
 
 func startCoreProcess(paths appPaths, executable, logPath, workingDir string, args []string) (*mihomoProcess, error) {
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("open core log: %w", err)
-	}
-	logWriter := &debugLogWriter{paths: paths, file: logFile}
+	logWriter := &debugLogWriter{paths: paths, path: logPath}
 	cmd := exec.Command(executable, args...)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = workingDir, logWriter, logWriter
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
 		return nil, err
 	}
-	p := &mihomoProcess{cmd: cmd, exit: make(chan error, 1), logFile: logFile}
-	go func() { err := cmd.Wait(); logFile.Close(); p.exit <- err }()
+	p := &mihomoProcess{cmd: cmd, exit: make(chan error, 1), logWriter: logWriter}
+	go func() {
+		err := cmd.Wait()
+		_ = logWriter.Close()
+		p.exit <- err
+	}()
 	return p, nil
 }
 
 type debugLogWriter struct {
 	paths appPaths
+	path  string
+	mu    sync.Mutex
 	file  *os.File
 }
 
@@ -84,14 +85,37 @@ func (w *debugLogWriter) Write(data []byte) (int, error) {
 	if !debugLoggingEnabled(w.paths) {
 		return len(data), nil
 	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		if err := w.paths.ensureDataDirs(); err != nil {
+			return 0, err
+		}
+		file, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return 0, fmt.Errorf("open core log: %w", err)
+		}
+		w.file = file
+	}
 	return w.file.Write(data)
 }
 
+func (w *debugLogWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	err := w.file.Close()
+	w.file = nil
+	return err
+}
+
 type mihomoProcess struct {
-	cmd      *exec.Cmd
-	exit     chan error
-	logFile  *os.File
-	stopOnce sync.Once
+	cmd       *exec.Cmd
+	exit      chan error
+	logWriter *debugLogWriter
+	stopOnce  sync.Once
 }
 
 func validateMihomoConfig(paths appPaths) error {

@@ -11,8 +11,9 @@ void main() {
 
   setUp(() async {
     dataDir = await Directory.systemTemp.createTemp('mclash-core-state-');
-    await Directory('${dataDir.path}${Platform.pathSeparator}profiles')
-        .create(recursive: true);
+    await Directory(
+      '${dataDir.path}${Platform.pathSeparator}profiles',
+    ).create(recursive: true);
     service = WindowsProxyPlatformService(dataDir: dataDir.path);
   });
 
@@ -29,10 +30,12 @@ void main() {
 
   test('remembers the active profile for each core', () async {
     final separator = Platform.pathSeparator;
-    await File('${dataDir.path}${separator}profiles${separator}home.yaml')
-        .writeAsString('mixed-port: 7890\nproxies: []\n');
-    await File('${dataDir.path}${separator}profiles${separator}box.json')
-        .writeAsString('{"inbounds": []}\n');
+    await File(
+      '${dataDir.path}${separator}profiles${separator}home.yaml',
+    ).writeAsString('mixed-port: 7890\nproxies: []\n');
+    await File(
+      '${dataDir.path}${separator}profiles${separator}box.json',
+    ).writeAsString('{"inbounds": []}\n');
     await File('${dataDir.path}${separator}state.json').writeAsString(
       jsonEncode(<String, dynamic>{
         'coreType': 'mihomo',
@@ -61,8 +64,9 @@ void main() {
 
   test('changing only network mode keeps the current profile', () async {
     final separator = Platform.pathSeparator;
-    await File('${dataDir.path}${separator}profiles${separator}selected.yaml')
-        .writeAsString('mixed-port: 7890\nproxies: []\n');
+    await File(
+      '${dataDir.path}${separator}profiles${separator}selected.yaml',
+    ).writeAsString('mixed-port: 7890\nproxies: []\n');
     await File('${dataDir.path}${separator}state.json').writeAsString(
       jsonEncode(<String, dynamic>{
         'coreType': 'mihomo',

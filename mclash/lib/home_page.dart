@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'app_notice.dart';
 import 'config_page.dart';
 import 'models.dart';
 import 'native_proxy_service.dart';
@@ -113,26 +114,30 @@ class _HomePageState extends State<HomePage> {
                       const _UsageNoticeItem(
                         icon: Icons.code_rounded,
                         title: '完全透明开源',
-                        body: '本项目完全透明开源，构建脚本和完整项目源码均随发布包提供，'
+                        body:
+                            '本项目完全透明开源，构建脚本和完整项目源码均随发布包提供，'
                             '可供审查、学习、修改和自行编译。',
                       ),
                       const _UsageNoticeItem(
                         icon: Icons.verified_user_outlined,
                         title: '仅限合法用途',
-                        body: '仅可用于学习研究、软件开发、网络调试、个人隐私保护，'
+                        body:
+                            '仅可用于学习研究、软件开发、网络调试、个人隐私保护，'
                             '以及已经获得明确授权的网络和设备。',
                       ),
                       const _UsageNoticeItem(
                         icon: Icons.block_outlined,
                         title: '禁止违法滥用',
-                        body: '禁止用于未经授权的入侵、攻击、扫描、诈骗、窃取数据、'
+                        body:
+                            '禁止用于未经授权的入侵、攻击、扫描、诈骗、窃取数据、'
                             '侵犯隐私、传播违法内容或其他违法活动。',
                         warning: true,
                       ),
                       const _UsageNoticeItem(
                         icon: Icons.info_outline,
                         title: '责任说明',
-                        body: '本项目不提供节点、订阅或内容服务。使用者应遵守法律法规，'
+                        body:
+                            '本项目不提供节点、订阅或内容服务。使用者应遵守法律法规，'
                             '并自行承担配置和使用行为产生的责任。',
                       ),
                       const SizedBox(height: 8),
@@ -175,8 +180,10 @@ class _HomePageState extends State<HomePage> {
                           } catch (error) {
                             if (!dialogContext.mounted) return;
                             setDialogState(() => saving = false);
-                            ScaffoldMessenger.of(dialogContext).showSnackBar(
-                              SnackBar(content: Text('保存声明状态失败：$error')),
+                            AppNotice.show(
+                              dialogContext,
+                              '保存声明状态失败：$error',
+                              error: true,
                             );
                           }
                         },
@@ -207,8 +214,8 @@ class _HomePageState extends State<HomePage> {
       final config = await _service.getConfigInfo();
       final running = await _service.isRunning();
       final debugLoggingEnabled = await _service.getDebugLoggingEnabled();
-      final serviceAutoStartEnabled =
-          await _service.getServiceAutoStartEnabled();
+      final serviceAutoStartEnabled = await _service
+          .getServiceAutoStartEnabled();
       final networkMode = await _service.getNetworkMode();
       final coreType = await _service.getCoreType();
       await _service.syncSystemProxy();
@@ -240,12 +247,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> _openProxyBoard() async {
     const url = 'https://board.zash.run.place/#/proxies';
     try {
-      await Process.start(
-          'explorer.exe',
-          const [
-            url,
-          ],
-          mode: ProcessStartMode.detached);
+      await Process.start('explorer.exe', const [
+        url,
+      ], mode: ProcessStartMode.detached);
     } catch (error) {
       if (mounted) _showError('打开代理面板失败：$error');
     }
@@ -288,13 +292,10 @@ class _HomePageState extends State<HomePage> {
         _coreType = core;
         _status = wasRunning ? ProxyStatus.running : _status;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '已切换到 ${core == CoreType.mihomo ? 'mihomo' : 'sing-box'} + '
-            '${target == NetworkMode.tun ? 'TUN' : '系统代理'}',
-          ),
-        ),
+      AppNotice.show(
+        context,
+        '已切换到 ${core == CoreType.mihomo ? 'mihomo' : 'sing-box'} + '
+        '${target == NetworkMode.tun ? 'TUN' : '系统代理'}',
       );
     } catch (error) {
       if (!mounted) return;
@@ -431,14 +432,12 @@ class _HomePageState extends State<HomePage> {
     final core = switch (selected) {
       _RunModeChoice.mihomoTun || _RunModeChoice.mihomoProxy => CoreType.mihomo,
       _RunModeChoice.singBoxTun ||
-      _RunModeChoice.singBoxProxy =>
-        CoreType.singBox,
+      _RunModeChoice.singBoxProxy => CoreType.singBox,
     };
     final mode = switch (selected) {
       _RunModeChoice.mihomoTun || _RunModeChoice.singBoxTun => NetworkMode.tun,
       _RunModeChoice.mihomoProxy ||
-      _RunModeChoice.singBoxProxy =>
-        NetworkMode.proxy,
+      _RunModeChoice.singBoxProxy => NetworkMode.proxy,
     };
     await _switchRunMode(core, mode);
   }
@@ -484,14 +483,16 @@ class _HomePageState extends State<HomePage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('更新内核',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              const Text(
+                '更新内核',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+              ),
               const SizedBox(height: 18),
               _coreUpdateCard(sheetContext, CoreType.mihomo, 'mihomo'),
               const SizedBox(height: 12),
               _coreUpdateCard(sheetContext, CoreType.singBox, 'sing-box'),
               const SizedBox(height: 14),
-              const Center(child: Text('更新正在运行的内核前，请先停止代理。')),
+              const Center(child: Text('更新会先完成下载，再自动停止代理、替换内核并恢复运行。')),
             ],
           ),
         ),
@@ -499,13 +500,10 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _coreUpdateCard(
-    BuildContext context,
-    CoreType core,
-    String name,
-  ) {
+  Widget _coreUpdateCard(BuildContext context, CoreType core, String name) {
     CoreUpdateInfo? info;
     var busy = false;
+    var updating = false;
     return StatefulBuilder(
       builder: (context, setCardState) {
         return Card(
@@ -527,6 +525,12 @@ class _HomePageState extends State<HomePage> {
                       ? '尚未检测版本'
                       : '当前 ${info!.currentVersion} / 官方 ${info!.latestVersion}',
                 ),
+                if (updating) ...[
+                  const SizedBox(height: 14),
+                  const LinearProgressIndicator(),
+                  const SizedBox(height: 8),
+                  const Text('正在下载并更新内核，请勿关闭应用…'),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -551,30 +555,38 @@ class _HomePageState extends State<HomePage> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton(
-                        onPressed: busy || _status != ProxyStatus.stopped
+                        onPressed:
+                            busy ||
+                                _status == ProxyStatus.starting ||
+                                _status == ProxyStatus.stopping
                             ? null
                             : () async {
-                                setCardState(() => busy = true);
+                                setCardState(() {
+                                  busy = true;
+                                  updating = true;
+                                });
                                 try {
                                   info ??= await _service.checkCoreUpdate(core);
                                   await _service.updateCore(core);
                                   if (mounted) {
-                                    ScaffoldMessenger.of(
+                                    AppNotice.show(
                                       this.context,
-                                    ).showSnackBar(
-                                      SnackBar(
-                                        content: Text('$name 内核更新完成'),
-                                      ),
+                                      '$name 内核更新完成',
                                     );
                                   }
                                 } catch (error) {
-                                  if (mounted) _showError(error);
+                                  if (mounted) {
+                                    await _showCoreUpdateFailure(name, error);
+                                  }
                                 }
                                 if (context.mounted) {
-                                  setCardState(() => busy = false);
+                                  setCardState(() {
+                                    busy = false;
+                                    updating = false;
+                                  });
                                 }
                               },
-                        child: const Text('更新内核'),
+                        child: Text(updating ? '正在更新…' : '更新内核'),
                       ),
                     ),
                   ],
@@ -584,6 +596,62 @@ class _HomePageState extends State<HomePage> {
           ),
         );
       },
+    );
+  }
+
+  Future<void> _showCoreUpdateFailure(String name, Object error) async {
+    String updateLog;
+    if (!_debugLoggingEnabled) {
+      updateLog = '调试日志未开启，本次更新未写入日志。';
+    } else {
+      try {
+        updateLog = await _service.getDebugLogContent('update.log');
+      } catch (logError) {
+        updateLog = '读取 update.log 失败：$logError';
+      }
+    }
+    if (!mounted) return;
+
+    final lines = updateLog.trimRight().split('\n');
+    final recentLog =
+        (lines.length > 80 ? lines.sublist(lines.length - 80) : lines).join(
+          '\n',
+        );
+    final logTitle = _debugLoggingEnabled ? '最近的 update.log' : '调试日志';
+    final details = '错误：$error\n\n$logTitle：\n$recentLog';
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('$name 内核更新失败'),
+        content: SizedBox(
+          width: 640,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 520),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                details,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: details));
+              if (!dialogContext.mounted) return;
+              AppNotice.show(dialogContext, '失败日志已复制');
+            },
+            icon: const Icon(Icons.copy),
+            label: const Text('复制日志'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -706,8 +774,10 @@ class _HomePageState extends State<HomePage> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title,
-                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Text(
+                        title,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 6),
                       Text('预计约 $seconds 秒'),
                     ],
@@ -771,10 +841,9 @@ class _HomePageState extends State<HomePage> {
                     leading: Icon(
                       log.id == 'update.log'
                           ? Icons.system_update_alt_rounded
-                          : log.id == 'mihomo.log' ||
-                                  log.id == 'sing-box.log'
-                              ? Icons.memory_rounded
-                              : Icons.settings_applications_outlined,
+                          : log.id == 'mihomo.log' || log.id == 'sing-box.log'
+                          ? Icons.memory_rounded
+                          : Icons.settings_applications_outlined,
                     ),
                     title: Text(log.displayName),
                     subtitle: Text(log.description),
@@ -806,7 +875,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _confirmClearDebugLogs() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed =
+        await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: const Text('清除调试日志'),
@@ -833,9 +903,7 @@ class _HomePageState extends State<HomePage> {
     try {
       await _service.clearDebugLogs();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('调试日志已清除')));
+      AppNotice.show(context, '调试日志已清除');
     } catch (error) {
       if (!mounted) return;
       _showError(error);
@@ -868,9 +936,7 @@ class _HomePageState extends State<HomePage> {
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: log));
                 if (!dialogContext.mounted) return;
-                ScaffoldMessenger.of(
-                  dialogContext,
-                ).showSnackBar(const SnackBar(content: Text('日志已复制')));
+                AppNotice.show(dialogContext, '日志已复制');
               },
               icon: const Icon(Icons.copy),
               label: const Text('复制'),
@@ -889,24 +955,22 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _showError(Object error) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(error.toString())));
+    AppNotice.show(context, error.toString(), error: true);
   }
 
   String get _statusText => switch (_status) {
-        ProxyStatus.stopped => '未启动',
-        ProxyStatus.starting => '正在启动',
-        ProxyStatus.running => '运行中',
-        ProxyStatus.stopping => '正在停止',
-      };
+    ProxyStatus.stopped => '未启动',
+    ProxyStatus.starting => '正在启动',
+    ProxyStatus.running => '运行中',
+    ProxyStatus.stopping => '正在停止',
+  };
 
   String get _buttonText => switch (_status) {
-        ProxyStatus.stopped => '启动代理',
-        ProxyStatus.starting => '正在启动',
-        ProxyStatus.running => '停止代理',
-        ProxyStatus.stopping => '正在停止',
-      };
+    ProxyStatus.stopped => '启动代理',
+    ProxyStatus.starting => '正在启动',
+    ProxyStatus.running => '停止代理',
+    ProxyStatus.stopping => '正在停止',
+  };
 
   PopupMenuItem<_HomeMenuAction> _menuItem({
     required _HomeMenuAction value,
@@ -1024,10 +1088,11 @@ class _HomePageState extends State<HomePage> {
                 borderRadius: BorderRadius.circular(28),
                 boxShadow: [
                   BoxShadow(
-                    color: (running
-                            ? const Color(0xFF356AE6)
-                            : const Color(0xFF202B45))
-                        .withValues(alpha: 0.20),
+                    color:
+                        (running
+                                ? const Color(0xFF356AE6)
+                                : const Color(0xFF202B45))
+                            .withValues(alpha: 0.20),
                     blurRadius: 26,
                     offset: const Offset(0, 12),
                   ),
@@ -1119,8 +1184,9 @@ class _HomePageState extends State<HomePage> {
                       onPressed: busy ? null : _toggle,
                       style: FilledButton.styleFrom(
                         backgroundColor: Colors.white,
-                        foregroundColor:
-                            running ? colors.error : const Color(0xFF2859C5),
+                        foregroundColor: running
+                            ? colors.error
+                            : const Color(0xFF2859C5),
                         disabledBackgroundColor: Colors.white.withValues(
                           alpha: 0.72,
                         ),

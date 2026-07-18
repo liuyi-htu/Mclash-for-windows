@@ -62,11 +62,13 @@ rules:
       await service.setNetworkMode(NetworkMode.tun);
 
       expect(await profile.readAsString(), source);
-      final runtime = loadYaml(
-        await File(
-          '${temporaryDirectory.path}\\config.yaml',
-        ).readAsString(),
-      ) as YamlMap;
+      final runtime =
+          loadYaml(
+                await File(
+                  '${temporaryDirectory.path}\\config.yaml',
+                ).readAsString(),
+              )
+              as YamlMap;
       expect(runtime['tun']['enable'], isTrue);
       expect(runtime['tun']['stack'], 'system');
       expect(runtime['tun']['strict-route'], isTrue);
@@ -122,12 +124,12 @@ rules:
   test('lists only profiles supported by the selected core', () async {
     final profiles = Directory('${temporaryDirectory.path}\\profiles');
     await profiles.create(recursive: true);
-    await File('${profiles.path}\\clash.yaml').writeAsString(
-      'mixed-port: 7890\nrules:\n  - MATCH,DIRECT\n',
-    );
-    await File('${profiles.path}\\sing-box.json').writeAsString(
-      '{"inbounds":[],"outbounds":[{"type":"direct"}]}',
-    );
+    await File(
+      '${profiles.path}\\clash.yaml',
+    ).writeAsString('mixed-port: 7890\nrules:\n  - MATCH,DIRECT\n');
+    await File(
+      '${profiles.path}\\sing-box.json',
+    ).writeAsString('{"inbounds":[],"outbounds":[{"type":"direct"}]}');
     await File('${temporaryDirectory.path}\\state.json').writeAsString(
       jsonEncode(<String, dynamic>{
         'profileNames': <String, String>{
