@@ -7,11 +7,20 @@ import 'package:yaml_edit/yaml_edit.dart';
 
 import 'models.dart';
 import 'proxy_platform_service.dart';
+import 'windows_system_proxy_manager.dart';
 
 class WindowsProxyPlatformService implements ProxyPlatformService {
-  WindowsProxyPlatformService({String? dataDir}) : _dataDirOverride = dataDir;
+  WindowsProxyPlatformService({
+    String? dataDir,
+    String? systemProxyBackupPath,
+    RegistryProcessRunner? registryProcessRunner,
+  }) : _dataDirOverride = dataDir,
+       _systemProxyBackupPathOverride = systemProxyBackupPath,
+       _registryProcessRunner = registryProcessRunner;
 
   final String? _dataDirOverride;
+  final String? _systemProxyBackupPathOverride;
+  final RegistryProcessRunner? _registryProcessRunner;
 
   String get _dataDir =>
       _dataDirOverride ??
@@ -23,6 +32,14 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
   String get _singBoxConfigPath => '$_dataDir\\sing-box.json';
   String get _serviceExe =>
       '${File(Platform.resolvedExecutable).parent.path}\\MclashService.exe';
+  String get _systemProxyBackupPath =>
+      _systemProxyBackupPathOverride ??
+      '${Platform.environment['LOCALAPPDATA'] ?? _dataDir}\\Mclash\\system-proxy-backup.json';
+  WindowsSystemProxyManager get _systemProxyManager =>
+      WindowsSystemProxyManager(
+        backupPath: _systemProxyBackupPath,
+        processRunner: _registryProcessRunner,
+      );
 
   Future<void> _ensureDirectories() async {
     await Directory(_profilesDir).create(recursive: true);
@@ -133,40 +150,36 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
   Future<void> _setSystemProxyEnabled(bool enabled) async {
     if (enabled) {
       final port = await _systemProxyPort();
-      await _runRegistry(<String>[
-        'add',
-        r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-        '/v',
-        'ProxyServer',
-        '/t',
-        'REG_SZ',
-        '/d',
-        '127.0.0.1:$port',
-        '/f',
-      ]);
-      await _runRegistry(<String>[
-        'add',
-        r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-        '/v',
-        'ProxyOverride',
-        '/t',
-        'REG_SZ',
-        '/d',
-        r'<local>;localhost;127.*',
-        '/f',
-      ]);
+      await _systemProxyManager.enable(
+        port: port,
+        bypass: const <String>[
+          '<local>',
+          'localhost',
+          '127.*',
+          '10.*',
+          '192.168.*',
+          '169.254.*',
+          '172.16.*',
+          '172.17.*',
+          '172.18.*',
+          '172.19.*',
+          '172.20.*',
+          '172.21.*',
+          '172.22.*',
+          '172.23.*',
+          '172.24.*',
+          '172.25.*',
+          '172.26.*',
+          '172.27.*',
+          '172.28.*',
+          '172.29.*',
+          '172.30.*',
+          '172.31.*',
+        ].join(';'),
+      );
+    } else {
+      await _systemProxyManager.restore();
     }
-    await _runRegistry(<String>[
-      'add',
-      r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-      '/v',
-      'ProxyEnable',
-      '/t',
-      'REG_DWORD',
-      '/d',
-      enabled ? '1' : '0',
-      '/f',
-    ]);
     await _notifySystemProxyChanged();
   }
 
@@ -204,14 +217,6 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
       if (port != null && port >= 1 && port <= 65535) return port;
     }
     throw StateError('代理模式需要在配置中设置 mixed-port 或 port。');
-  }
-
-  Future<void> _runRegistry(List<String> arguments) async {
-    final result = await Process.run('reg.exe', arguments, runInShell: false);
-    if (result.exitCode != 0) {
-      final message = result.stderr.toString().trim();
-      throw StateError(message.isEmpty ? '更新 Windows 系统代理失败。' : message);
-    }
   }
 
   Future<void> _notifySystemProxyChanged() async {
