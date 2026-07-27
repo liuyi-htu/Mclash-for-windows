@@ -102,6 +102,45 @@ rules:
     },
   );
 
+  test('supports YAML anchors and aliases in mihomo profiles', () async {
+    final profiles = Directory('${temporaryDirectory.path}\\profiles');
+    await profiles.create(recursive: true);
+    final profile = File('${profiles.path}\\anchored.yaml');
+    const source = '''
+mixed-port: 7890
+dns:
+  enable: true
+  ipv6: true
+  nameserver: &cn_doh
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+  nameserver-policy:
+    geosite:cn: *cn_doh
+tun:
+  enable: false
+rules:
+  - MATCH,DIRECT
+''';
+    await profile.writeAsString(source);
+    await File('${temporaryDirectory.path}\\state.json').writeAsString(
+      jsonEncode(<String, dynamic>{'activeProfile': 'anchored.yaml'}),
+    );
+
+    await service.setNetworkMode(NetworkMode.tun);
+
+    expect(await profile.readAsString(), source);
+    final runtimeContent = await File(
+      '${temporaryDirectory.path}\\config.yaml',
+    ).readAsString();
+    final runtime = loadYaml(runtimeContent) as YamlMap;
+    expect(runtime['dns']['nameserver-policy']['geosite:cn'], <String>[
+      'https://doh.pub/dns-query',
+      'https://dns.alidns.com/dns-query',
+    ]);
+    expect(runtime['dns']['ipv6'], isFalse);
+    expect(runtime['tun']['enable'], isTrue);
+  });
+
   test('creates and removes a managed sing-box TUN inbound', () async {
     final config = File('${temporaryDirectory.path}\\sing-box.json');
     await config.writeAsString('''

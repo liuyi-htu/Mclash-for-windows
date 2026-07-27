@@ -380,6 +380,23 @@ public static class WinInetProxy {
     return result;
   }
 
+  Object? _plainYamlValue(Object? value) {
+    if (value is YamlMap) {
+      return _plainYamlMap(value);
+    }
+    if (value is YamlList) {
+      return <Object?>[
+        for (final item in value) _plainYamlValue(item),
+      ];
+    }
+    return value;
+  }
+
+  Map<Object?, Object?> _plainYamlMap(YamlMap value) => <Object?, Object?>{
+    for (final key in value.keys)
+      _plainYamlValue(key): _plainYamlValue(value[key]),
+  };
+
   Future<void> _refreshRuntimeConfig() async {
     final state = await _readSettings();
     final active = state['activeProfile']?.toString();
@@ -697,47 +714,99 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       throw const FormatException('mihomo configuration must be a YAML map.');
     }
 
-    final editor = YamlEditor(secured);
-    editor.update(<Object>['ipv6'], ipv6Enabled);
-    final dns = document['dns'];
-    if (dns is YamlMap) {
-      editor.update(<Object>['dns', 'ipv6'], ipv6Enabled);
+    try {
+      final editor = YamlEditor(secured);
+      editor.update(<Object>['ipv6'], ipv6Enabled);
+      final dns = document['dns'];
+      if (dns is YamlMap) {
+        editor.update(<Object>['dns', 'ipv6'], ipv6Enabled);
+      }
+      final enabled = mode == NetworkMode.tun;
+      final tun = document['tun'];
+      if (tun is YamlMap) {
+        editor.update(<Object>['tun', 'enable'], enabled);
+        editor.update(
+          <Object>['tun', 'route-exclude-address'],
+          _routeExcludes(tun['route-exclude-address'], bypassLanEnabled),
+        );
+        if (enabled) {
+          if (!tun.containsKey('stack')) {
+            editor.update(<Object>['tun', 'stack'], 'mixed');
+          }
+          if (!tun.containsKey('auto-route')) {
+            editor.update(<Object>['tun', 'auto-route'], true);
+          }
+          if (!tun.containsKey('auto-detect-interface')) {
+            editor.update(<Object>['tun', 'auto-detect-interface'], true);
+          }
+        }
+      } else {
+        editor.update(
+          <Object>['tun'],
+          <String, dynamic>{
+            'enable': enabled,
+            'route-exclude-address': bypassLanEnabled
+                ? _privateNetworkCidrs
+                : const <String>[],
+            if (enabled) ...<String, dynamic>{
+              'stack': 'mixed',
+              'auto-route': true,
+              'auto-detect-interface': true,
+            },
+          },
+        );
+      }
+      return '${editor.toString().trimRight()}\n';
+    } on AliasException {
+      return _runtimeConfigWithExpandedAliases(
+        document,
+        mode,
+        ipv6Enabled: ipv6Enabled,
+        bypassLanEnabled: bypassLanEnabled,
+      );
     }
+  }
+
+  String _runtimeConfigWithExpandedAliases(
+    YamlMap document,
+    NetworkMode mode, {
+    required bool ipv6Enabled,
+    required bool bypassLanEnabled,
+  }) {
+    final runtime = _plainYamlMap(document);
+    runtime['ipv6'] = ipv6Enabled;
+    final dns = runtime['dns'];
+    if (dns is Map) dns['ipv6'] = ipv6Enabled;
+
     final enabled = mode == NetworkMode.tun;
-    final tun = document['tun'];
-    if (tun is YamlMap) {
-      editor.update(<Object>['tun', 'enable'], enabled);
-      editor.update(
-        <Object>['tun', 'route-exclude-address'],
-        _routeExcludes(tun['route-exclude-address'], bypassLanEnabled),
+    final tun = runtime['tun'];
+    if (tun is Map) {
+      tun['enable'] = enabled;
+      tun['route-exclude-address'] = _routeExcludes(
+        tun['route-exclude-address'],
+        bypassLanEnabled,
       );
       if (enabled) {
-        if (!tun.containsKey('stack')) {
-          editor.update(<Object>['tun', 'stack'], 'mixed');
-        }
-        if (!tun.containsKey('auto-route')) {
-          editor.update(<Object>['tun', 'auto-route'], true);
-        }
-        if (!tun.containsKey('auto-detect-interface')) {
-          editor.update(<Object>['tun', 'auto-detect-interface'], true);
-        }
+        tun.putIfAbsent('stack', () => 'mixed');
+        tun.putIfAbsent('auto-route', () => true);
+        tun.putIfAbsent('auto-detect-interface', () => true);
       }
     } else {
-      editor.update(
-        <Object>['tun'],
-        <String, dynamic>{
-          'enable': enabled,
-          'route-exclude-address': bypassLanEnabled
-              ? _privateNetworkCidrs
-              : const <String>[],
-          if (enabled) ...<String, dynamic>{
-            'stack': 'mixed',
-            'auto-route': true,
-            'auto-detect-interface': true,
-          },
+      runtime['tun'] = <String, dynamic>{
+        'enable': enabled,
+        'route-exclude-address': bypassLanEnabled
+            ? _privateNetworkCidrs
+            : const <String>[],
+        if (enabled) ...<String, dynamic>{
+          'stack': 'mixed',
+          'auto-route': true,
+          'auto-detect-interface': true,
         },
-      );
+      };
     }
+
+    final editor = YamlEditor('{}');
+    editor.update(const <Object>[], runtime);
     return '${editor.toString().trimRight()}\n';
   }
 
