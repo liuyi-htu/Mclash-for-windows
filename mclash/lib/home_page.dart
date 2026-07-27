@@ -27,6 +27,8 @@ class _HomePageState extends State<HomePage> {
   ConfigInfo _config = const ConfigInfo(exists: false);
   bool _debugLoggingEnabled = false;
   bool _serviceAutoStartEnabled = false;
+  bool _ipv6Enabled = false;
+  bool _bypassLanEnabled = true;
   NetworkMode _networkMode = NetworkMode.proxy;
   CoreType _coreType = CoreType.mihomo;
   bool _switchingMode = false;
@@ -216,6 +218,8 @@ class _HomePageState extends State<HomePage> {
       final debugLoggingEnabled = await _service.getDebugLoggingEnabled();
       final serviceAutoStartEnabled = await _service
           .getServiceAutoStartEnabled();
+      final ipv6Enabled = await _service.getIpv6Enabled();
+      final bypassLanEnabled = await _service.getBypassLanEnabled();
       final networkMode = await _service.getNetworkMode();
       final coreType = await _service.getCoreType();
       await _service.syncSystemProxy();
@@ -225,6 +229,8 @@ class _HomePageState extends State<HomePage> {
         _status = running ? ProxyStatus.running : ProxyStatus.stopped;
         _debugLoggingEnabled = debugLoggingEnabled;
         _serviceAutoStartEnabled = serviceAutoStartEnabled;
+        _ipv6Enabled = ipv6Enabled;
+        _bypassLanEnabled = bypassLanEnabled;
         _networkMode = networkMode;
         _coreType = coreType;
       });
@@ -312,6 +318,8 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _showGeneralSettings() async {
     var changingAutoStart = false;
+    var changingIpv6 = false;
+    var changingBypassLan = false;
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -350,6 +358,68 @@ class _HomePageState extends State<HomePage> {
                         } finally {
                           if (sheetContext.mounted) {
                             setSheetState(() => changingAutoStart = false);
+                          }
+                        }
+                      },
+              ),
+              SwitchListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                secondary: const Icon(Icons.language_rounded),
+                title: const Text(
+                  '启用 IPv6',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text('允许代理内核使用 IPv6 网络'),
+                value: _ipv6Enabled,
+                onChanged: changingIpv6
+                    ? null
+                    : (enabled) async {
+                        setSheetState(() => changingIpv6 = true);
+                        try {
+                          await _service.setIpv6Enabled(enabled);
+                          if (_status == ProxyStatus.running) {
+                            await _service.restart();
+                          }
+                          if (mounted) {
+                            setState(() => _ipv6Enabled = enabled);
+                          }
+                        } catch (error) {
+                          if (mounted) _showError('修改 IPv6 设置失败：$error');
+                        } finally {
+                          if (sheetContext.mounted) {
+                            setSheetState(() => changingIpv6 = false);
+                          }
+                        }
+                      },
+              ),
+              SwitchListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                secondary: const Icon(Icons.lan_outlined),
+                title: const Text(
+                  '绕过局域网',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text('局域网和私有地址不经过代理'),
+                value: _bypassLanEnabled,
+                onChanged: changingBypassLan
+                    ? null
+                    : (enabled) async {
+                        setSheetState(() => changingBypassLan = true);
+                        try {
+                          await _service.setBypassLanEnabled(enabled);
+                          if (_status == ProxyStatus.running) {
+                            await _service.restart();
+                          } else {
+                            await _service.syncSystemProxy();
+                          }
+                          if (mounted) {
+                            setState(() => _bypassLanEnabled = enabled);
+                          }
+                        } catch (error) {
+                          if (mounted) _showError('修改局域网绕过设置失败：$error');
+                        } finally {
+                          if (sheetContext.mounted) {
+                            setSheetState(() => changingBypassLan = false);
                           }
                         }
                       },
@@ -984,10 +1054,10 @@ class _HomePageState extends State<HomePage> {
       enabled: enabled,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       child: Container(
-        constraints: const BoxConstraints(minWidth: 250),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               width: 38,
@@ -999,17 +1069,9 @@ class _HomePageState extends State<HomePage> {
               child: Icon(icon, size: 21, color: colors.onPrimaryContainer),
             ),
             const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
+            Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -1041,6 +1103,7 @@ class _HomePageState extends State<HomePage> {
               tooltip: '更多功能',
               onSelected: _handleMenuAction,
               offset: const Offset(0, 10),
+              constraints: const BoxConstraints(minWidth: 150, maxWidth: 180),
               icon: Container(
                 width: 42,
                 height: 42,

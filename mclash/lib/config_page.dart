@@ -591,6 +591,7 @@ class _ConfigPageState extends State<ConfigPage> {
               enabled: !_working && !widget.proxyRunning,
               tooltip: widget.proxyRunning ? '请先停止代理' : '添加配置',
               onSelected: _handleAdd,
+              constraints: const BoxConstraints(minWidth: 190, maxWidth: 230),
               icon: Container(
                 width: 42,
                 height: 42,
@@ -606,23 +607,33 @@ class _ConfigPageState extends State<ConfigPage> {
               itemBuilder: (context) => [
                 PopupMenuItem(
                   value: _AddConfigAction.local,
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.file_open_outlined),
-                    title: Text(
-                      _coreType == CoreType.mihomo
-                          ? '导入 mihomo YAML'
-                          : '导入 sing-box JSON',
-                    ),
+                  height: 48,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.file_open_outlined),
+                      const SizedBox(width: 12),
+                      Text(
+                        _coreType == CoreType.mihomo
+                            ? '导入 mihomo YAML'
+                            : '导入 sing-box JSON',
+                      ),
+                    ],
                   ),
                 ),
                 if (_coreType == CoreType.mihomo)
                   const PopupMenuItem(
                     value: _AddConfigAction.subscription,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.cloud_download_outlined),
-                      title: Text('添加机场订阅'),
+                    height: 48,
+                    padding: EdgeInsets.symmetric(horizontal: 14),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.cloud_download_outlined),
+                        SizedBox(width: 12),
+                        Text('添加机场订阅'),
+                      ],
                     ),
                   ),
               ],

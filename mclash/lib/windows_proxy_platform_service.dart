@@ -22,6 +22,41 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
   final String? _systemProxyBackupPathOverride;
   final RegistryProcessRunner? _registryProcessRunner;
 
+  static const _loopbackProxyBypass = <String>['localhost', '127.*'];
+  static const _privateNetworkCidrs = <String>[
+    '10.0.0.0/8',
+    '172.16.0.0/12',
+    '192.168.0.0/16',
+    '169.254.0.0/16',
+    'fc00::/7',
+    'fe80::/10',
+  ];
+  static const _privateProxyBypass = <String>[
+    '<local>',
+    ..._loopbackProxyBypass,
+    '10.*',
+    '192.168.*',
+    '169.254.*',
+    '172.16.*',
+    '172.17.*',
+    '172.18.*',
+    '172.19.*',
+    '172.20.*',
+    '172.21.*',
+    '172.22.*',
+    '172.23.*',
+    '172.24.*',
+    '172.25.*',
+    '172.26.*',
+    '172.27.*',
+    '172.28.*',
+    '172.29.*',
+    '172.30.*',
+    '172.31.*',
+  ];
+  static const _managedSingBoxIpv6Address = 'fdfe:dcba:9876::1/126';
+  static const _defaultProfileId = 'default.yaml';
+
   String get _dataDir =>
       _dataDirOverride ??
       '${File(Platform.resolvedExecutable).parent.path}\\data';
@@ -150,32 +185,12 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
   Future<void> _setSystemProxyEnabled(bool enabled) async {
     if (enabled) {
       final port = await _systemProxyPort();
+      final bypassLan = await getBypassLanEnabled();
       await _systemProxyManager.enable(
         port: port,
-        bypass: const <String>[
-          '<local>',
-          'localhost',
-          '127.*',
-          '10.*',
-          '192.168.*',
-          '169.254.*',
-          '172.16.*',
-          '172.17.*',
-          '172.18.*',
-          '172.19.*',
-          '172.20.*',
-          '172.21.*',
-          '172.22.*',
-          '172.23.*',
-          '172.24.*',
-          '172.25.*',
-          '172.26.*',
-          '172.27.*',
-          '172.28.*',
-          '172.29.*',
-          '172.30.*',
-          '172.31.*',
-        ].join(';'),
+        bypass: (bypassLan ? _privateProxyBypass : _loopbackProxyBypass).join(
+          ';',
+        ),
       );
     } else {
       await _systemProxyManager.restore();
@@ -253,6 +268,7 @@ public static class WinInetProxy {
   Future<void> setNetworkMode(NetworkMode mode) async {
     await _ensureDirectories();
     final state = await _readState();
+    final preferences = _runtimePreferencesFromState(state);
     final core = await getCoreType();
     final active = state['activeProfile']?.toString();
     File? source;
@@ -272,16 +288,108 @@ public static class WinInetProxy {
       if (core == CoreType.singBox) {
         await File(
           _singBoxConfigPath,
-        ).writeAsString(_singBoxRuntimeConfig(content, mode), flush: true);
+        ).writeAsString(
+          _singBoxRuntimeConfig(
+            content,
+            mode,
+            ipv6Enabled: preferences.ipv6Enabled,
+            bypassLanEnabled: preferences.bypassLanEnabled,
+          ),
+          flush: true,
+        );
       } else {
         await File(
           _configPath,
-        ).writeAsString(_runtimeConfig(content, mode), flush: true);
+        ).writeAsString(
+          _runtimeConfig(
+            content,
+            mode,
+            ipv6Enabled: preferences.ipv6Enabled,
+            bypassLanEnabled: preferences.bypassLanEnabled,
+          ),
+          flush: true,
+        );
       }
     }
     await _updateState(<String, dynamic>{
       'networkMode': mode == NetworkMode.tun ? 'tun' : 'proxy',
     });
+  }
+
+  @override
+  Future<bool> getIpv6Enabled() async =>
+      (await _readState())['ipv6Enabled'] == true;
+
+  @override
+  Future<void> setIpv6Enabled(bool enabled) async {
+    await _updateState(<String, dynamic>{'ipv6Enabled': enabled});
+    await _refreshRuntimeConfig();
+  }
+
+  @override
+  Future<bool> getBypassLanEnabled() async =>
+      (await _readState())['bypassLanEnabled'] != false;
+
+  @override
+  Future<void> setBypassLanEnabled(bool enabled) async {
+    await _updateState(<String, dynamic>{'bypassLanEnabled': enabled});
+    await _refreshRuntimeConfig();
+  }
+
+  _RuntimePreferences _runtimePreferencesFromState(
+    Map<String, dynamic> state,
+  ) => _RuntimePreferences(
+    ipv6Enabled: state['ipv6Enabled'] == true,
+    bypassLanEnabled: state['bypassLanEnabled'] != false,
+  );
+
+  List<String> _routeExcludes(Object? existing, bool bypassLanEnabled) {
+    final result = existing is Iterable
+        ? existing.map((value) => value.toString()).toList()
+        : <String>[];
+    result.removeWhere(_privateNetworkCidrs.contains);
+    if (bypassLanEnabled) result.addAll(_privateNetworkCidrs);
+    return result;
+  }
+
+  Future<void> _refreshRuntimeConfig() async {
+    final state = await _readState();
+    final active = state['activeProfile']?.toString();
+    final singBox = state['coreType'] == 'sing-box';
+    File? source;
+    if (active != null && active.isNotEmpty) {
+      final profile = File(_profilePath(active));
+      if (await profile.exists()) source = profile;
+    }
+    final resolvedSource =
+        source ?? File(singBox ? _singBoxConfigPath : _configPath);
+    if (!await resolvedSource.exists()) return;
+    final content = await resolvedSource.readAsString();
+    final mode = state['networkMode'] == 'tun'
+        ? NetworkMode.tun
+        : NetworkMode.proxy;
+    final preferences = _runtimePreferencesFromState(state);
+    if (singBox) {
+      await File(_singBoxConfigPath).writeAsString(
+        _singBoxRuntimeConfig(
+          content,
+          mode,
+          ipv6Enabled: preferences.ipv6Enabled,
+          bypassLanEnabled: preferences.bypassLanEnabled,
+        ),
+        flush: true,
+      );
+    } else {
+      await File(_configPath).writeAsString(
+        _runtimeConfig(
+          content,
+          mode,
+          ipv6Enabled: preferences.ipv6Enabled,
+          bypassLanEnabled: preferences.bypassLanEnabled,
+        ),
+        flush: true,
+      );
+    }
   }
 
   @override
@@ -374,17 +482,21 @@ public static class WinInetProxy {
     final core = await getCoreType();
     var state = await _readState();
     var active = state['activeProfile']?.toString();
-    final defaultProfile = File(_profilePath('default.yaml'));
+    final defaultProfile = File(_profilePath(_defaultProfileId));
     if (active == null &&
+        state['defaultProfileDeleted'] != true &&
         await File(_configPath).exists() &&
         !await defaultProfile.exists()) {
       await File(_configPath).copy(defaultProfile.path);
+      final names = _stateMap(state, 'profileNames')
+        ..[_defaultProfileId] = 'Default';
       await _updateState(<String, dynamic>{
-        'activeProfile': 'default.yaml',
-        'profileNames': <String, dynamic>{'default.yaml': 'Default'},
+        'activeProfile': _defaultProfileId,
+        'activeMihomoProfile': _defaultProfileId,
+        'profileNames': names,
       });
       state = await _readState();
-      active = 'default.yaml';
+      active = _defaultProfileId;
     }
     final rawNames = state['profileNames'];
     final names = rawNames is Map ? rawNames : const <String, dynamic>{};
@@ -545,7 +657,12 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     return result;
   }
 
-  String _runtimeConfig(String content, NetworkMode mode) {
+  String _runtimeConfig(
+    String content,
+    NetworkMode mode, {
+    bool ipv6Enabled = false,
+    bool bypassLanEnabled = true,
+  }) {
     final secured = _secureController(content);
     final document = loadYaml(secured);
     if (document is! YamlMap) {
@@ -553,10 +670,19 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     }
 
     final editor = YamlEditor(secured);
+    editor.update(<Object>['ipv6'], ipv6Enabled);
+    final dns = document['dns'];
+    if (dns is YamlMap) {
+      editor.update(<Object>['dns', 'ipv6'], ipv6Enabled);
+    }
     final enabled = mode == NetworkMode.tun;
     final tun = document['tun'];
     if (tun is YamlMap) {
       editor.update(<Object>['tun', 'enable'], enabled);
+      editor.update(
+        <Object>['tun', 'route-exclude-address'],
+        _routeExcludes(tun['route-exclude-address'], bypassLanEnabled),
+      );
       if (enabled) {
         if (!tun.containsKey('stack')) {
           editor.update(<Object>['tun', 'stack'], 'mixed');
@@ -573,6 +699,9 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         <Object>['tun'],
         <String, dynamic>{
           'enable': enabled,
+          'route-exclude-address': bypassLanEnabled
+              ? _privateNetworkCidrs
+              : const <String>[],
           if (enabled) ...<String, dynamic>{
             'stack': 'mixed',
             'auto-route': true,
@@ -584,7 +713,12 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     return '${editor.toString().trimRight()}\n';
   }
 
-  String _singBoxRuntimeConfig(String content, NetworkMode mode) {
+  String _singBoxRuntimeConfig(
+    String content,
+    NetworkMode mode, {
+    bool ipv6Enabled = false,
+    bool bypassLanEnabled = true,
+  }) {
     final decoded = jsonDecode(content);
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('sing-box 配置必须是 JSON 对象。');
@@ -600,6 +734,31 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
           entry['type'] == 'tun' &&
           entry['tag'] == 'mclash-tun',
     );
+    for (var index = 0; index < inbounds.length; index++) {
+      final entry = inbounds[index];
+      if (entry is! Map || entry['type'] != 'tun') continue;
+      final updated = Map<String, dynamic>.from(entry);
+      final addresses = List<String>.from(
+        updated['address'] is List
+            ? (updated['address'] as List).map((value) => value.toString())
+            : const <String>[],
+      );
+      if (ipv6Enabled) {
+        if (!addresses.any((address) => address.contains(':'))) {
+          addresses.add(_managedSingBoxIpv6Address);
+        }
+      } else {
+        addresses.removeWhere((address) => address.contains(':'));
+      }
+      if (updated['address'] is List || addresses.isNotEmpty) {
+        updated['address'] = addresses;
+      }
+      updated['route_exclude_address'] = _routeExcludes(
+        updated['route_exclude_address'],
+        bypassLanEnabled,
+      );
+      inbounds[index] = updated;
+    }
     if (mode == NetworkMode.tun) {
       final hasTun = inbounds.any(
         (entry) => entry is Map && entry['type'] == 'tun',
@@ -609,9 +768,15 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
           'type': 'tun',
           'tag': 'mclash-tun',
           'interface_name': 'Mclash',
-          'address': <String>['172.19.0.1/30'],
+          'address': <String>[
+            '172.19.0.1/30',
+            if (ipv6Enabled) _managedSingBoxIpv6Address,
+          ],
           'auto_route': true,
           'strict_route': true,
+          'route_exclude_address': bypassLanEnabled
+              ? _privateNetworkCidrs
+              : const <String>[],
         });
       }
     }
@@ -649,8 +814,27 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     return '${const JsonEncoder.withIndent('  ').convert(decoded)}\n';
   }
 
-  Future<String> _runtimeConfigForCurrentMode(String content) async =>
-      _runtimeConfig(content, await getNetworkMode());
+  Future<String> _runtimeConfigForCurrentMode(String content) async {
+    final state = await _readState();
+    final preferences = _runtimePreferencesFromState(state);
+    return _runtimeConfig(
+      content,
+      state['networkMode'] == 'tun' ? NetworkMode.tun : NetworkMode.proxy,
+      ipv6Enabled: preferences.ipv6Enabled,
+      bypassLanEnabled: preferences.bypassLanEnabled,
+    );
+  }
+
+  Future<String> _singBoxRuntimeConfigForCurrentMode(String content) async {
+    final state = await _readState();
+    final preferences = _runtimePreferencesFromState(state);
+    return _singBoxRuntimeConfig(
+      content,
+      state['networkMode'] == 'tun' ? NetworkMode.tun : NetworkMode.proxy,
+      ipv6Enabled: preferences.ipv6Enabled,
+      bypassLanEnabled: preferences.bypassLanEnabled,
+    );
+  }
 
   @override
   Future<ConfigInfo> selectConfig(String id) async {
@@ -663,7 +847,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     if (isJSON) {
       await File(
         _singBoxConfigPath,
-      ).writeAsString(_singBoxRuntimeConfig(content, await getNetworkMode()));
+      ).writeAsString(await _singBoxRuntimeConfigForCurrentMode(content));
     } else {
       await File(
         _configPath,
@@ -695,7 +879,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       if (id.toLowerCase().endsWith('.json')) {
         await File(
           _singBoxConfigPath,
-        ).writeAsString(_singBoxRuntimeConfig(content, await getNetworkMode()));
+        ).writeAsString(await _singBoxRuntimeConfigForCurrentMode(content));
       } else {
         await File(
           _configPath,
@@ -725,7 +909,9 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   @override
   Future<List<ConfigProfile>> deleteConfig(String id) async {
     final state = await _readState();
-    if (state['activeProfile'] == id) {
+    final deletingDefault = id.toLowerCase() == _defaultProfileId;
+    final deletingActive = state['activeProfile'] == id;
+    if (deletingActive && !deletingDefault) {
       throw StateError(
         'Select another profile before deleting the active profile.',
       );
@@ -737,11 +923,19 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     )..remove(id);
     final types = _stateMap(state, 'profileTypes')..remove(id);
     final urls = _stateMap(state, 'profileUrls')..remove(id);
-    await _updateState(<String, dynamic>{
+    final changes = <String, dynamic>{
       'profileNames': names,
       'profileTypes': types,
       'profileUrls': urls,
-    });
+      if (deletingDefault) 'defaultProfileDeleted': true,
+      if (deletingActive) 'activeProfile': null,
+      if (state['activeMihomoProfile'] == id) 'activeMihomoProfile': null,
+    };
+    if (deletingActive && !id.toLowerCase().endsWith('.json')) {
+      final runtime = File(_configPath);
+      if (await runtime.exists()) await runtime.delete();
+    }
+    await _updateState(changes);
     return getConfigs();
   }
 
@@ -1036,4 +1230,14 @@ class _SubscriptionDownload {
   final int statusCode;
   final int contentLength;
   final String? contentType;
+}
+
+class _RuntimePreferences {
+  const _RuntimePreferences({
+    required this.ipv6Enabled,
+    required this.bypassLanEnabled,
+  });
+
+  final bool ipv6Enabled;
+  final bool bypassLanEnabled;
 }

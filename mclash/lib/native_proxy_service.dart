@@ -90,6 +90,16 @@ class NativeProxyService implements ProxyPlatformService {
   Future<void> setServiceAutoStartEnabled(bool enabled) =>
       _delegate.setServiceAutoStartEnabled(enabled);
   @override
+  Future<bool> getIpv6Enabled() => _delegate.getIpv6Enabled();
+  @override
+  Future<void> setIpv6Enabled(bool enabled) =>
+      _delegate.setIpv6Enabled(enabled);
+  @override
+  Future<bool> getBypassLanEnabled() => _delegate.getBypassLanEnabled();
+  @override
+  Future<void> setBypassLanEnabled(bool enabled) =>
+      _delegate.setBypassLanEnabled(enabled);
+  @override
   Future<CoreUpdateInfo> checkCoreUpdate(CoreType core) =>
       _delegate.checkCoreUpdate(core);
   @override

@@ -44,6 +44,10 @@ abstract interface class ProxyPlatformService {
   Future<void> clearDebugLogs();
   Future<bool> getServiceAutoStartEnabled();
   Future<void> setServiceAutoStartEnabled(bool enabled);
+  Future<bool> getIpv6Enabled();
+  Future<void> setIpv6Enabled(bool enabled);
+  Future<bool> getBypassLanEnabled();
+  Future<void> setBypassLanEnabled(bool enabled);
   Future<CoreUpdateInfo> checkCoreUpdate(CoreType core);
   Future<void> updateCore(CoreType core);
 }

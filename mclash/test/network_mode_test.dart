@@ -21,9 +21,18 @@ void main() {
 
   test('defaults to proxy mode and switches both directions', () async {
     final config = File('${temporaryDirectory.path}\\config.yaml');
-    await config.writeAsString('mixed-port: 7890\nrules:\n  - MATCH,DIRECT\n');
+    await config.writeAsString('''
+mixed-port: 7890
+dns:
+  enable: true
+  ipv6: true
+rules:
+  - MATCH,DIRECT
+''');
 
     expect(await service.getNetworkMode(), NetworkMode.proxy);
+    expect(await service.getIpv6Enabled(), isFalse);
+    expect(await service.getBypassLanEnabled(), isTrue);
 
     await service.setNetworkMode(NetworkMode.tun);
     expect(await service.getNetworkMode(), NetworkMode.tun);
@@ -32,11 +41,28 @@ void main() {
     expect(yaml['tun']['stack'], 'mixed');
     expect(yaml['tun']['auto-route'], isTrue);
     expect(yaml['tun']['auto-detect-interface'], isTrue);
+    expect(yaml['tun']['route-exclude-address'], <String>[
+      '10.0.0.0/8',
+      '172.16.0.0/12',
+      '192.168.0.0/16',
+      '169.254.0.0/16',
+      'fc00::/7',
+      'fe80::/10',
+    ]);
+    expect(yaml['ipv6'], isFalse);
+    expect(yaml['dns']['ipv6'], isFalse);
 
+    await service.setIpv6Enabled(true);
+    await service.setBypassLanEnabled(false);
     await service.setNetworkMode(NetworkMode.proxy);
     expect(await service.getNetworkMode(), NetworkMode.proxy);
+    expect(await service.getIpv6Enabled(), isTrue);
+    expect(await service.getBypassLanEnabled(), isFalse);
     yaml = loadYaml(await config.readAsString()) as YamlMap;
     expect(yaml['tun']['enable'], isFalse);
+    expect(yaml['tun']['route-exclude-address'], isEmpty);
+    expect(yaml['ipv6'], isTrue);
+    expect(yaml['dns']['ipv6'], isTrue);
   });
 
   test(
@@ -81,6 +107,8 @@ rules:
     await config.writeAsString('''
 {"inbounds":[{"type":"mixed","listen_port":7890}],"outbounds":[{"type":"direct"}]}
 ''');
+    await service.setIpv6Enabled(true);
+    await service.setBypassLanEnabled(false);
     await service.setCoreType(CoreType.singBox);
     await service.setNetworkMode(NetworkMode.tun);
     var decoded =
@@ -91,6 +119,11 @@ rules:
       ),
       isTrue,
     );
+    final managedTun = (decoded['inbounds'] as List)
+        .whereType<Map>()
+        .firstWhere((entry) => entry['tag'] == 'mclash-tun');
+    expect(managedTun['address'], contains('fdfe:dcba:9876::1/126'));
+    expect(managedTun['route_exclude_address'], isEmpty);
     final ruleSets = (decoded['route'] as Map)['rule_set'] as List;
     expect(
       ruleSets.map((entry) => (entry as Map)['tag']),
