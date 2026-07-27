@@ -1,19 +1,28 @@
-name: Build and Release
+name: Build or Promote Release
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: Release version without the v prefix (for example, 1.0.3)
+      operation:
+        description: Build a prerelease, or promote the current prerelease without rebuilding
         required: true
-        type: string
+        default: build-prerelease
+        type: choice
+        options:
+          - build-prerelease
+          - promote-stable
 
 permissions:
   contents: write
 
+concurrency:
+  group: mclash-release
+  cancel-in-progress: false
+
 jobs:
   windows-release:
-    name: Build Windows installer
+    if: ${{ inputs.operation == 'build-prerelease' }}
+    name: Build Windows prerelease
     runs-on: windows-latest
     timeout-minutes: 45
 
@@ -37,16 +46,29 @@ jobs:
         shell: powershell
         run: choco install innosetup --no-progress -y
 
-      - name: Prepare release version
+      - name: Prepare prerelease version
         shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $version = "${{ inputs.version }}".Trim()
-          if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw "Version must use the x.y.z format without a v prefix."
+          $latestRelease = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" |
+            ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $latestRelease) {
+            throw "A published stable release is required before building a prerelease."
           }
+          $latestTag = "$($latestRelease.tag_name)".Trim()
+          if ($latestTag -notmatch '^v(\d+)\.(\d+)\.(\d+)$') {
+            throw "Latest stable release tag must use the vX.Y.Z format: $latestTag"
+          }
+          $major = [int]$Matches[1]
+          $minor = [int]$Matches[2]
+          $patch = [int]$Matches[3] + 1
+          $version = "$major.$minor.$patch"
           "MCLASH_VERSION=$version" >> $env:GITHUB_ENV
           "RELEASE_TAG=v$version" >> $env:GITHUB_ENV
           "INSTALLER_NAME=Mclash-Windows-Setup-$version.exe" >> $env:GITHUB_ENV
+          Write-Host "Latest stable release: $latestTag"
+          Write-Host "Prerelease target: v$version"
           (Get-Content -LiteralPath "mclash/pubspec.yaml" -Raw) `
             -replace '(?m)^version:\s*.*$', "version: $version" |
             Set-Content -LiteralPath "mclash/pubspec.yaml" -Encoding utf8
@@ -63,12 +85,78 @@ jobs:
           "$hash  $env:INSTALLER_NAME" |
             Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
 
-      - name: Publish GitHub Release
+      - name: Remove previous build of this prerelease
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $existing = gh release view $env:RELEASE_TAG `
+            --json isPrerelease `
+            --jq .isPrerelease 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "No previous $env:RELEASE_TAG prerelease exists."
+            exit 0
+          }
+          if ("$existing".Trim().ToLowerInvariant() -ne "true") {
+            throw "Refusing to replace $env:RELEASE_TAG because it is not a prerelease."
+          }
+          gh release delete $env:RELEASE_TAG --yes --cleanup-tag
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to remove the previous $env:RELEASE_TAG prerelease."
+          }
+
+      - name: Publish GitHub prerelease
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Mclash ${{ env.MCLASH_VERSION }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
           generate_release_notes: true
           files: |
             installer/Output/${{ env.INSTALLER_NAME }}
             installer/Output/${{ env.INSTALLER_NAME }}.sha256
+
+  promote-stable:
+    if: ${{ inputs.operation == 'promote-stable' }}
+    name: Promote prerelease to stable
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Promote the next version
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $latestRelease = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" |
+            ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $latestRelease) {
+            throw "A published stable release is required before promoting a prerelease."
+          }
+          $latestTag = "$($latestRelease.tag_name)".Trim()
+          if ($latestTag -notmatch '^v(\d+)\.(\d+)\.(\d+)$') {
+            throw "Latest stable release tag must use the vX.Y.Z format: $latestTag"
+          }
+          $major = [int]$Matches[1]
+          $minor = [int]$Matches[2]
+          $patch = [int]$Matches[3] + 1
+          $targetTag = "v$major.$minor.$patch"
+
+          $targetRelease = gh release view $targetTag `
+            --json isDraft,isPrerelease,url |
+            ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $targetRelease) {
+            throw "Prerelease $targetTag does not exist. Build it before promoting."
+          }
+          if ($targetRelease.isDraft -or -not $targetRelease.isPrerelease) {
+            throw "Refusing to promote $targetTag because it is not a published prerelease."
+          }
+
+          gh release edit $targetTag --prerelease=false --latest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to promote $targetTag."
+          }
+          Write-Host "Promoted $targetTag to the latest stable release."
+          Write-Host $targetRelease.url
