@@ -150,6 +150,7 @@ jobs:
           $targetTag = "v$major.$minor.$patch"
 
           $targetRelease = gh release view $targetTag `
+            --repo $env:GITHUB_REPOSITORY `
             --json isDraft,isPrerelease,url |
             ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or -not $targetRelease) {
@@ -159,7 +160,10 @@ jobs:
             throw "Refusing to promote $targetTag because it is not a published prerelease."
           }
 
-          gh release edit $targetTag --prerelease=false --latest
+          gh release edit $targetTag `
+            --repo $env:GITHUB_REPOSITORY `
+            --prerelease=false `
+            --latest
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to promote $targetTag."
           }
