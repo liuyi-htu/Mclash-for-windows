@@ -90,14 +90,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $existing = gh release view $env:RELEASE_TAG `
-            --json isPrerelease `
-            --jq .isPrerelease 2>$null
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" |
+            ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) {
+            throw "Failed to query existing releases."
+          }
+          $existing = $releases |
+            Where-Object { $_.tag_name -eq $env:RELEASE_TAG } |
+            Select-Object -First 1
+          if (-not $existing) {
             Write-Host "No previous $env:RELEASE_TAG prerelease exists."
             exit 0
           }
-          if ("$existing".Trim().ToLowerInvariant() -ne "true") {
+          if (-not $existing.prerelease) {
             throw "Refusing to replace $env:RELEASE_TAG because it is not a prerelease."
           }
           gh release delete $env:RELEASE_TAG --yes --cleanup-tag
