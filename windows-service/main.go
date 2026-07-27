@@ -76,6 +76,10 @@ func run(args []string) int {
 		err = setServiceAutoStart(true)
 	case "disable-autostart":
 		err = setServiceAutoStart(false)
+	case "clear-runtime-message":
+		err = clearRuntimeMessage(paths)
+	case "restore-system-proxy":
+		err = restoreSystemProxy(paths.ProxyBackup)
 	case "core-update-json":
 		appendUpdateLog(paths, "[mihomo] 开始检测内核更新")
 		info, _, updateErr := checkCoreUpdate(paths)
@@ -150,17 +154,23 @@ func parsePaths(command string, args []string) (appPaths, error) {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	base := flags.String("base", "", "program directory")
 	dataDir := flags.String("data-dir", "", "shared data directory")
+	proxyBackup := flags.String("proxy-backup", "", "system proxy backup file")
 	elevated := flags.Bool("elevated", false, "internal elevation marker")
 	_ = elevated
 	if err := flags.Parse(args); err != nil {
 		return appPaths{}, err
 	}
-	return resolvePaths(*base, *dataDir)
+	paths, err := resolvePaths(*base, *dataDir)
+	if err != nil {
+		return appPaths{}, err
+	}
+	paths.ProxyBackup = *proxyBackup
+	return paths, nil
 }
 
 func isMutation(command string) bool {
 	switch command {
-	case "install", "uninstall", "start", "stop", "restart", "update-core", "update-singbox", "enable-autostart", "disable-autostart":
+	case "install", "uninstall", "start", "stop", "restart", "update-core", "update-singbox", "enable-autostart", "disable-autostart", "restore-system-proxy":
 		return true
 	default:
 		return false
@@ -190,6 +200,7 @@ Usage:
 Commands:
   install uninstall start stop restart status status-json
   autostart-json enable-autostart disable-autostart
+  clear-runtime-message restore-system-proxy
   core-update-json update-core singbox-update-json update-singbox
   run-service help`)
 }

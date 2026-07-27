@@ -27,7 +27,15 @@ class WindowsSystemProxyManager {
   ) => Process.run(executable, arguments, runInShell: false);
 
   Future<void> enable({required int port, required String bypass}) async {
-    await _backupIfNeeded();
+    final owned = <String, _RegistryValue>{
+      'ProxyEnable': const _RegistryValue(type: 'REG_DWORD', data: '1'),
+      'ProxyServer': _RegistryValue(
+        type: 'REG_SZ',
+        data: '127.0.0.1:$port',
+      ),
+      'ProxyOverride': _RegistryValue(type: 'REG_SZ', data: bypass),
+    };
+    await _backupForEnable(owned);
     await _writeValue('ProxyServer', 'REG_SZ', '127.0.0.1:$port');
     await _writeValue('ProxyOverride', 'REG_SZ', bypass);
     await _writeValue('ProxyEnable', 'REG_DWORD', '1');
@@ -41,50 +49,138 @@ class WindowsSystemProxyManager {
       return;
     }
 
-    final decoded = jsonDecode(await backup.readAsString());
-    if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('Invalid system proxy backup.');
+    final decoded = _decodeBackup(await backup.readAsString());
+    final original = decoded.original;
+    final owned = decoded.owned;
+    final stillOwned = owned == null
+        ? await _looksLikeLegacyMclashProxy()
+        : await _isOwnedByMclash(owned);
+    if (!stillOwned) {
+      // Another application or the user changed the proxy after Mclash. Do not
+      // overwrite that newer choice, and relinquish the stale backup.
+      await backup.delete();
+      return;
     }
     for (final name in managedValues) {
-      final saved = decoded[name];
+      final saved = original[name];
       if (saved == null) {
         await _deleteValue(name);
         continue;
       }
-      if (saved is! Map || saved['type'] is! String || saved['data'] is! String) {
-        throw const FormatException('Invalid system proxy backup value.');
-      }
-      await _writeValue(
-        name,
-        saved['type'] as String,
-        saved['data'] as String,
-      );
+      await _writeValue(name, saved.type, saved.data);
     }
     await backup.delete();
   }
 
-  Future<void> _backupIfNeeded() async {
+  Future<void> _backupForEnable(
+    Map<String, _RegistryValue> desiredOwnership,
+  ) async {
     final backup = File(backupPath);
+    Map<String, _RegistryValue?> original;
     if (await backup.exists()) {
-      // Do not replace the real pre-Mclash settings when start/sync is called
-      // more than once while Mclash already owns the system proxy.
-      jsonDecode(await backup.readAsString());
-      return;
+      final existing = _decodeBackup(await backup.readAsString());
+      final stillOwned = existing.owned == null
+          ? await _looksLikeLegacyMclashProxy()
+          : await _isOwnedByMclash(existing.owned!);
+      original = stillOwned
+          ? existing.original
+          : await _readManagedValues();
+    } else {
+      original = await _readManagedValues();
     }
 
-    final values = <String, dynamic>{};
-    for (final name in managedValues) {
-      final value = await _readValue(name);
-      values[name] = value?.toJson();
-    }
     await backup.parent.create(recursive: true);
+    await _writeBackup(
+      backup,
+      <String, dynamic>{
+        'version': 2,
+        'original': _valuesToJson(original),
+        'owned': _valuesToJson(desiredOwnership),
+      },
+    );
+  }
+
+  Future<Map<String, _RegistryValue?>> _readManagedValues() async {
+    final values = <String, _RegistryValue?>{};
+    for (final name in managedValues) {
+      values[name] = await _readValue(name);
+    }
+    return values;
+  }
+
+  Future<void> _writeBackup(
+    File backup,
+    Map<String, dynamic> payload,
+  ) async {
     final temporary = File('${backup.path}.tmp');
     await temporary.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(values),
+      const JsonEncoder.withIndent('  ').convert(payload),
       flush: true,
     );
-    if (await backup.exists()) await backup.delete();
     await temporary.rename(backup.path);
+  }
+
+  Map<String, dynamic> _valuesToJson(
+    Map<String, _RegistryValue?> values,
+  ) => <String, dynamic>{
+    for (final name in managedValues) name: values[name]?.toJson(),
+  };
+
+  _ProxyBackup _decodeBackup(String content) {
+    final decoded = jsonDecode(content);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Invalid system proxy backup.');
+    }
+    // Version 1 backups stored the original values at the top level.
+    final originalSource = decoded['original'] ?? decoded;
+    final ownedSource = decoded['owned'];
+    return _ProxyBackup(
+      original: _decodeValues(originalSource),
+      owned: ownedSource == null ? null : _decodeValues(ownedSource),
+    );
+  }
+
+  Map<String, _RegistryValue?> _decodeValues(Object? source) {
+    if (source is! Map) {
+      throw const FormatException('Invalid system proxy backup values.');
+    }
+    final values = <String, _RegistryValue?>{};
+    for (final name in managedValues) {
+      final saved = source[name];
+      if (saved == null) {
+        values[name] = null;
+      } else if (saved is Map &&
+          saved['type'] is String &&
+          saved['data'] is String) {
+        values[name] = _RegistryValue(
+          type: saved['type'] as String,
+          data: saved['data'] as String,
+        );
+      } else {
+        throw const FormatException('Invalid system proxy backup value.');
+      }
+    }
+    return values;
+  }
+
+  Future<bool> _isOwnedByMclash(
+    Map<String, _RegistryValue?> expected,
+  ) async {
+    final expectedServer = expected['ProxyServer'];
+    if (expectedServer == null) return false;
+    final currentServer = await _readValue('ProxyServer');
+    return currentServer != null &&
+        currentServer.sameValue(expectedServer) &&
+        expectedServer.data.startsWith('127.0.0.1:');
+  }
+
+  Future<bool> _looksLikeLegacyMclashProxy() async {
+    final server = await _readValue('ProxyServer');
+    final enabled = await _readValue('ProxyEnable');
+    return server != null &&
+        RegExp(r'^127\.0\.0\.1:\d+$').hasMatch(server.data) &&
+        enabled != null &&
+        enabled.asDword() == 1;
   }
 
   Future<_RegistryValue?> _readValue(String name) async {
@@ -151,8 +247,33 @@ class _RegistryValue {
   final String type;
   final String data;
 
+  bool sameValue(_RegistryValue other) {
+    if (type.toUpperCase() != other.type.toUpperCase()) return false;
+    final leftDword = asDword();
+    final rightDword = other.asDword();
+    if (leftDword != null && rightDword != null) {
+      return leftDword == rightDword;
+    }
+    return data == other.data;
+  }
+
+  int? asDword() {
+    if (type.toUpperCase() != 'REG_DWORD') return null;
+    final normalized = data.trim().toLowerCase();
+    return normalized.startsWith('0x')
+        ? int.tryParse(normalized.substring(2), radix: 16)
+        : int.tryParse(normalized);
+  }
+
   Map<String, String> toJson() => <String, String>{
     'type': type,
     'data': data,
   };
+}
+
+class _ProxyBackup {
+  const _ProxyBackup({required this.original, required this.owned});
+
+  final Map<String, _RegistryValue?> original;
+  final Map<String, _RegistryValue?>? owned;
 }

@@ -27,7 +27,10 @@ type appPaths struct {
 	ServiceLog    string
 	MihomoLog     string
 	SingBoxLog    string
-	State         string
+	Settings      string
+	RuntimeState  string
+	LegacyState   string
+	ProxyBackup   string
 	GeoSite       string
 	GeoIP         string
 	CountryDB     string
@@ -65,7 +68,9 @@ func resolvePaths(baseDir, dataDir string) (appPaths, error) {
 		ServiceLog:    filepath.Join(dataDir, "logs", "service.log"),
 		MihomoLog:     filepath.Join(dataDir, "logs", "mihomo.log"),
 		SingBoxLog:    filepath.Join(dataDir, "logs", "sing-box.log"),
-		State:         filepath.Join(dataDir, "state.json"),
+		Settings:      filepath.Join(dataDir, "settings.json"),
+		RuntimeState:  filepath.Join(dataDir, "runtime-state.json"),
+		LegacyState:   filepath.Join(dataDir, "state.json"),
 		GeoSite:       filepath.Join(dataDir, "GeoSite.dat"),
 		GeoIP:         filepath.Join(dataDir, "GeoIP.dat"),
 		CountryDB:     filepath.Join(dataDir, "Country.mmdb"),

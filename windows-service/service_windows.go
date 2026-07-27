@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -119,12 +118,5 @@ func (h *serviceHandler) logf(format string, args ...any) {
 
 func (h *serviceHandler) writeState(pid int, message string) {
 	_ = h.paths.ensureDataDirs()
-	state := map[string]any{}
-	if existing, err := os.ReadFile(h.paths.State); err == nil {
-		_ = json.Unmarshal(existing, &state)
-	}
-	state["mihomoPid"] = pid
-	state["message"] = message
-	data, _ := json.MarshalIndent(state, "", "  ")
-	_ = os.WriteFile(h.paths.State, data, 0o644)
+	_ = writeRuntimeState(h.paths, pid, message)
 }

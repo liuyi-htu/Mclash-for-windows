@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,24 +10,14 @@ import (
 )
 
 func selectedCore(paths appPaths) string {
-	data, err := os.ReadFile(paths.State)
-	if err != nil {
-		return "mihomo"
-	}
-	state := map[string]any{}
-	if json.Unmarshal(data, &state) == nil && state["coreType"] == "sing-box" {
+	if readSettings(paths)["coreType"] == "sing-box" {
 		return "sing-box"
 	}
 	return "mihomo"
 }
 
 func debugLoggingEnabled(paths appPaths) bool {
-	data, err := os.ReadFile(paths.State)
-	if err != nil {
-		return false
-	}
-	state := map[string]any{}
-	return json.Unmarshal(data, &state) == nil && state["debugLoggingEnabled"] == true
+	return readSettings(paths)["debugLoggingEnabled"] == true
 }
 
 func validateSelectedConfig(paths appPaths) error {

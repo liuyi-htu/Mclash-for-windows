@@ -22,7 +22,7 @@ void main() {
   });
 
   Future<Map<String, dynamic>> readState() async {
-    final file = File('${dataDir.path}${Platform.pathSeparator}state.json');
+    final file = File('${dataDir.path}${Platform.pathSeparator}settings.json');
     return Map<String, dynamic>.from(
       jsonDecode(await file.readAsString()) as Map,
     );
@@ -40,6 +40,8 @@ void main() {
       jsonEncode(<String, dynamic>{
         'coreType': 'mihomo',
         'activeProfile': 'home.yaml',
+        'mihomoPid': 42,
+        'message': 'legacy runtime message',
         'profileNames': <String, dynamic>{
           'home.yaml': 'Home',
           'box.json': 'Box',
@@ -49,6 +51,14 @@ void main() {
 
     await service.setCoreType(CoreType.singBox);
     var state = await readState();
+    expect(
+      await File(
+        '${dataDir.path}${separator}settings.json',
+      ).exists(),
+      isTrue,
+    );
+    expect(state.containsKey('mihomoPid'), isFalse);
+    expect(state.containsKey('message'), isFalse);
     expect(state['activeMihomoProfile'], 'home.yaml');
     expect(state['activeProfile'], isNull);
 

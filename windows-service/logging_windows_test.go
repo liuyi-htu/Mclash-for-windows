@@ -74,7 +74,7 @@ func setDebugLoggingForTest(t *testing.T, paths appPaths, enabled bool) {
 	if enabled {
 		value = "true"
 	}
-	if err := os.WriteFile(paths.State, []byte(`{"debugLoggingEnabled":`+value+`}`), 0o644); err != nil {
+	if err := os.WriteFile(paths.Settings, []byte(`{"debugLoggingEnabled":`+value+`}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

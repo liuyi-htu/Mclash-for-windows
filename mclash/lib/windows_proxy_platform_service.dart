@@ -9,18 +9,24 @@ import 'models.dart';
 import 'proxy_platform_service.dart';
 import 'windows_system_proxy_manager.dart';
 
+typedef ServiceProcessRunner =
+    Future<ProcessResult> Function(String executable, List<String> arguments);
+
 class WindowsProxyPlatformService implements ProxyPlatformService {
   WindowsProxyPlatformService({
     String? dataDir,
     String? systemProxyBackupPath,
     RegistryProcessRunner? registryProcessRunner,
+    ServiceProcessRunner? serviceProcessRunner,
   }) : _dataDirOverride = dataDir,
        _systemProxyBackupPathOverride = systemProxyBackupPath,
-       _registryProcessRunner = registryProcessRunner;
+       _registryProcessRunner = registryProcessRunner,
+       _serviceProcessRunner = serviceProcessRunner;
 
   final String? _dataDirOverride;
   final String? _systemProxyBackupPathOverride;
   final RegistryProcessRunner? _registryProcessRunner;
+  final ServiceProcessRunner? _serviceProcessRunner;
 
   static const _loopbackProxyBypass = <String>['localhost', '127.*'];
   static const _privateNetworkCidrs = <String>[
@@ -62,7 +68,8 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
       '${File(Platform.resolvedExecutable).parent.path}\\data';
   String get _profilesDir => '$_dataDir\\profiles';
   String get _logsDir => '$_dataDir\\logs';
-  String get _statePath => '$_dataDir\\state.json';
+  String get _settingsPath => '$_dataDir\\settings.json';
+  String get _legacyStatePath => '$_dataDir\\state.json';
   String get _configPath => '$_dataDir\\config.yaml';
   String get _singBoxConfigPath => '$_dataDir\\sing-box.json';
   String get _serviceExe =>
@@ -81,24 +88,40 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
     await Directory(_logsDir).create(recursive: true);
   }
 
-  Future<Map<String, dynamic>> _readState() async {
-    try {
-      final decoded = jsonDecode(await File(_statePath).readAsString());
-      return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
-    } catch (_) {
-      return <String, dynamic>{};
+  Future<Map<String, dynamic>?> _readJsonMap(File file) async {
+    if (!await file.exists()) return null;
+    final decoded = jsonDecode(await file.readAsString());
+    if (decoded is! Map<String, dynamic>) {
+      throw FormatException('${file.path} must contain a JSON object.');
     }
+    return decoded;
   }
 
-  Future<void> _updateState(Map<String, dynamic> changes) async {
+  Future<void> _writeSettings(Map<String, dynamic> settings) async {
     await _ensureDirectories();
-    final state = await _readState()
-      ..addAll(changes);
-    final temporary = File('$_statePath.tmp');
+    final temporary = File('$_settingsPath.tmp');
     await temporary.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(state),
+      const JsonEncoder.withIndent('  ').convert(settings),
+      flush: true,
     );
-    await temporary.rename(_statePath);
+    await temporary.rename(_settingsPath);
+  }
+
+  Future<Map<String, dynamic>> _readSettings() async {
+    final current = await _readJsonMap(File(_settingsPath));
+    if (current != null) return current;
+
+    final legacy = await _readJsonMap(File(_legacyStatePath));
+    if (legacy == null) return <String, dynamic>{};
+    legacy.remove('mihomoPid');
+    legacy.remove('message');
+    await _writeSettings(legacy);
+    return legacy;
+  }
+
+  Future<void> _updateSettings(Map<String, dynamic> changes) async {
+    final settings = await _readSettings()..addAll(changes);
+    await _writeSettings(settings);
   }
 
   Future<Map<String, dynamic>> _status() async {
@@ -121,16 +144,21 @@ class WindowsProxyPlatformService implements ProxyPlatformService {
     String command, {
     bool allowFailure = false,
   }) async {
-    if (!await File(_serviceExe).exists()) {
+    if (_serviceProcessRunner == null && !await File(_serviceExe).exists()) {
       throw StateError('MclashService.exe was not found next to Mclash.exe.');
     }
-    final result = await Process.run(_serviceExe, <String>[
+    final arguments = <String>[
       command,
       '--base',
       File(_serviceExe).parent.path,
       '--data-dir',
       _dataDir,
-    ], runInShell: false);
+    ];
+    final result = await (_serviceProcessRunner?.call(
+          _serviceExe,
+          arguments,
+        ) ??
+        Process.run(_serviceExe, arguments, runInShell: false));
     if (!allowFailure && result.exitCode != 0) {
       final message = result.stderr.toString().trim();
       throw StateError(
@@ -260,14 +288,14 @@ public static class WinInetProxy {
 
   @override
   Future<NetworkMode> getNetworkMode() async =>
-      (await _readState())['networkMode'] == 'tun'
+      (await _readSettings())['networkMode'] == 'tun'
       ? NetworkMode.tun
       : NetworkMode.proxy;
 
   @override
   Future<void> setNetworkMode(NetworkMode mode) async {
     await _ensureDirectories();
-    final state = await _readState();
+    final state = await _readSettings();
     final preferences = _runtimePreferencesFromState(state);
     final core = await getCoreType();
     final active = state['activeProfile']?.toString();
@@ -311,28 +339,28 @@ public static class WinInetProxy {
         );
       }
     }
-    await _updateState(<String, dynamic>{
+    await _updateSettings(<String, dynamic>{
       'networkMode': mode == NetworkMode.tun ? 'tun' : 'proxy',
     });
   }
 
   @override
   Future<bool> getIpv6Enabled() async =>
-      (await _readState())['ipv6Enabled'] == true;
+      (await _readSettings())['ipv6Enabled'] == true;
 
   @override
   Future<void> setIpv6Enabled(bool enabled) async {
-    await _updateState(<String, dynamic>{'ipv6Enabled': enabled});
+    await _updateSettings(<String, dynamic>{'ipv6Enabled': enabled});
     await _refreshRuntimeConfig();
   }
 
   @override
   Future<bool> getBypassLanEnabled() async =>
-      (await _readState())['bypassLanEnabled'] != false;
+      (await _readSettings())['bypassLanEnabled'] != false;
 
   @override
   Future<void> setBypassLanEnabled(bool enabled) async {
-    await _updateState(<String, dynamic>{'bypassLanEnabled': enabled});
+    await _updateSettings(<String, dynamic>{'bypassLanEnabled': enabled});
     await _refreshRuntimeConfig();
   }
 
@@ -353,7 +381,7 @@ public static class WinInetProxy {
   }
 
   Future<void> _refreshRuntimeConfig() async {
-    final state = await _readState();
+    final state = await _readSettings();
     final active = state['activeProfile']?.toString();
     final singBox = state['coreType'] == 'sing-box';
     File? source;
@@ -394,7 +422,7 @@ public static class WinInetProxy {
 
   @override
   Future<CoreType> getCoreType() async =>
-      (await _readState())['coreType'] == 'sing-box'
+      (await _readSettings())['coreType'] == 'sing-box'
       ? CoreType.singBox
       : CoreType.mihomo;
 
@@ -410,7 +438,7 @@ public static class WinInetProxy {
 
   @override
   Future<void> setCoreType(CoreType core) async {
-    final state = await _readState();
+    final state = await _readSettings();
     final currentCore = state['coreType'] == 'sing-box'
         ? CoreType.singBox
         : CoreType.mihomo;
@@ -436,12 +464,12 @@ public static class WinInetProxy {
     if (_profileMatchesCore(currentActive, currentCore)) {
       changes[currentActiveKey] = currentActive;
     }
-    await _updateState(changes);
+    await _updateSettings(changes);
   }
 
   @override
   Future<ConfigInfo> getConfigInfo() async {
-    final state = await _readState();
+    final state = await _readSettings();
     final core = await getCoreType();
     final exists = await File(
       core == CoreType.singBox ? _singBoxConfigPath : _configPath,
@@ -480,7 +508,7 @@ public static class WinInetProxy {
   Future<List<ConfigProfile>> getConfigs() async {
     await _ensureDirectories();
     final core = await getCoreType();
-    var state = await _readState();
+    var state = await _readSettings();
     var active = state['activeProfile']?.toString();
     final defaultProfile = File(_profilePath(_defaultProfileId));
     if (active == null &&
@@ -490,12 +518,12 @@ public static class WinInetProxy {
       await File(_configPath).copy(defaultProfile.path);
       final names = _stateMap(state, 'profileNames')
         ..[_defaultProfileId] = 'Default';
-      await _updateState(<String, dynamic>{
+      await _updateSettings(<String, dynamic>{
         'activeProfile': _defaultProfileId,
         'activeMihomoProfile': _defaultProfileId,
         'profileNames': names,
       });
-      state = await _readState();
+      state = await _readSettings();
       active = _defaultProfileId;
     }
     final rawNames = state['profileNames'];
@@ -579,7 +607,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     if (await isRunning()) {
       throw StateError('代理已启动，配置文件未导入。请停止代理后重试。');
     }
-    final state = await _readState();
+    final state = await _readSettings();
     final names = Map<String, dynamic>.from(
       state['profileNames'] is Map ? state['profileNames'] as Map : const {},
     );
@@ -629,7 +657,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       names[candidate] = id.substring(0, id.lastIndexOf('.'));
       importedProfileId = candidate;
     }
-    await _updateState(<String, dynamic>{'profileNames': names});
+    await _updateSettings(<String, dynamic>{'profileNames': names});
     if (importedProfileId != null) {
       await selectConfig(importedProfileId);
     }
@@ -815,7 +843,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   Future<String> _runtimeConfigForCurrentMode(String content) async {
-    final state = await _readState();
+    final state = await _readSettings();
     final preferences = _runtimePreferencesFromState(state);
     return _runtimeConfig(
       content,
@@ -826,7 +854,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   }
 
   Future<String> _singBoxRuntimeConfigForCurrentMode(String content) async {
-    final state = await _readState();
+    final state = await _readSettings();
     final preferences = _runtimePreferencesFromState(state);
     return _singBoxRuntimeConfig(
       content,
@@ -853,7 +881,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         _configPath,
       ).writeAsString(await _runtimeConfigForCurrentMode(content));
     }
-    await _updateState(<String, dynamic>{
+    await _updateSettings(<String, dynamic>{
       'activeProfile': id,
       if (isJSON) 'activeSingBoxProfile': id else 'activeMihomoProfile': id,
       'coreType': isJSON ? 'sing-box' : 'mihomo',
@@ -874,7 +902,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       throw ArgumentError('Configuration cannot be empty.');
     }
     await File(_profilePath(id)).writeAsString(content);
-    final state = await _readState();
+    final state = await _readSettings();
     if (state['activeProfile'] == id) {
       if (id.toLowerCase().endsWith('.json')) {
         await File(
@@ -897,18 +925,18 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     if (name.trim().isEmpty) {
       throw ArgumentError('Profile name cannot be empty.');
     }
-    final state = await _readState();
+    final state = await _readSettings();
     final names = Map<String, dynamic>.from(
       state['profileNames'] is Map ? state['profileNames'] as Map : const {},
     );
     names[id] = name.trim();
-    await _updateState(<String, dynamic>{'profileNames': names});
+    await _updateSettings(<String, dynamic>{'profileNames': names});
     return getConfigs();
   }
 
   @override
   Future<List<ConfigProfile>> deleteConfig(String id) async {
-    final state = await _readState();
+    final state = await _readSettings();
     final deletingDefault = id.toLowerCase() == _defaultProfileId;
     final deletingActive = state['activeProfile'] == id;
     if (deletingActive && !deletingDefault) {
@@ -935,7 +963,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       final runtime = File(_configPath);
       if (await runtime.exists()) await runtime.delete();
     }
-    await _updateState(changes);
+    await _updateSettings(changes);
     return getConfigs();
   }
 
@@ -977,16 +1005,16 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 
   @override
   Future<bool> getUsageNoticeAccepted() async =>
-      (await _readState())['usageNoticeAccepted'] == true;
+      (await _readSettings())['usageNoticeAccepted'] == true;
   @override
   Future<void> acceptUsageNotice() =>
-      _updateState(<String, dynamic>{'usageNoticeAccepted': true});
+      _updateSettings(<String, dynamic>{'usageNoticeAccepted': true});
   @override
   Future<bool> getDebugLoggingEnabled() async =>
-      (await _readState())['debugLoggingEnabled'] == true;
+      (await _readSettings())['debugLoggingEnabled'] == true;
   @override
   Future<void> setDebugLoggingEnabled(bool enabled) =>
-      _updateState(<String, dynamic>{'debugLoggingEnabled': enabled});
+      _updateSettings(<String, dynamic>{'debugLoggingEnabled': enabled});
   @override
   Future<void> clearDebugLogs() async {
     for (final name in const <String>[
@@ -998,7 +1026,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
       final file = File('$_logsDir\\$name');
       if (await file.exists()) await file.writeAsString('');
     }
-    await _updateState(<String, dynamic>{'message': ''});
+    await _runService('clear-runtime-message');
   }
 
   @override
@@ -1131,11 +1159,11 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     final download = await _downloadSubscription(cleanUrl);
     final id = _newSubscriptionId();
     await _writeSubscription(id, download.content);
-    final state = await _readState();
+    final state = await _readSettings();
     final names = _stateMap(state, 'profileNames')..[id] = cleanName;
     final types = _stateMap(state, 'profileTypes')..[id] = 'subscription';
     final urls = _stateMap(state, 'profileUrls')..[id] = cleanUrl;
-    await _updateState(<String, dynamic>{
+    await _updateSettings(<String, dynamic>{
       'profileNames': names,
       'profileTypes': types,
       'profileUrls': urls,
@@ -1151,7 +1179,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   }) async {
     final cleanName = name.trim();
     if (cleanName.isEmpty) throw ArgumentError('请输入订阅名称。');
-    final state = await _readState();
+    final state = await _readSettings();
     if (_stateMap(state, 'profileTypes')[id] != 'subscription') {
       throw StateError('所选配置不是机场订阅。');
     }
@@ -1160,7 +1188,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     await _writeSubscription(id, download.content);
     final names = _stateMap(state, 'profileNames')..[id] = cleanName;
     final urls = _stateMap(state, 'profileUrls')..[id] = cleanUrl;
-    await _updateState(<String, dynamic>{
+    await _updateSettings(<String, dynamic>{
       'profileNames': names,
       'profileUrls': urls,
     });
@@ -1175,7 +1203,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 
   @override
   Future<List<ConfigProfile>> refreshSubscription(String id) async {
-    final state = await _readState();
+    final state = await _readSettings();
     if (_stateMap(state, 'profileTypes')[id] != 'subscription') {
       throw StateError('所选配置不是机场订阅。');
     }
@@ -1194,7 +1222,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 
   @override
   Future<SubscriptionUrlTestResult> testSubscriptionUrl(String id) async {
-    final state = await _readState();
+    final state = await _readSettings();
     final url = _stateMap(state, 'profileUrls')[id]?.toString();
     if (url == null || url.isEmpty) throw StateError('订阅链接不存在。');
     try {

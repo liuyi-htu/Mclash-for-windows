@@ -181,8 +181,9 @@ foreach ($entry in $singBoxRuleSets) {
 Push-Location $flutterProject
 try {
     flutter pub get
-    dart format lib
+    dart format --output=none --set-exit-if-changed lib test
     flutter analyze
+    flutter test
     flutter build windows --release
 }
 finally {
@@ -194,8 +195,18 @@ try {
     $env:GOOS = "windows"
     $env:GOARCH = "amd64"
     $env:CGO_ENABLED = "0"
-    go mod tidy
-    gofmt -w .
+    $unformatted = @(gofmt -l .)
+    if ($unformatted.Count -gt 0) {
+        throw "Go files are not formatted: $($unformatted -join ', ')"
+    }
+    go mod tidy -diff
+    if ($LASTEXITCODE -ne 0) {
+        throw "go.mod or go.sum is not tidy."
+    }
+    go test ./...
+    if ($LASTEXITCODE -ne 0) {
+        throw "Go tests failed."
+    }
     Remove-Item -LiteralPath (Join-Path $packageDir "mihomoService.exe") -Force -ErrorAction SilentlyContinue
     go build -trimpath -ldflags="-s -w" -o "$packageDir\MclashService.exe" .
 }

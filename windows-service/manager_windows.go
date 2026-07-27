@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -228,17 +227,18 @@ func queryStatus(paths appPaths) statusResult {
 		return result
 	}
 	result.State = serviceStateName(status.State)
-	if data, err := os.ReadFile(paths.State); err == nil {
-		var saved persistedState
-		if json.Unmarshal(data, &saved) == nil {
-			result.MihomoPID = saved.MihomoPID
-			result.Message = saved.Message
-		}
-	}
+	saved := readRuntimeState(paths)
+	result.MihomoPID = saved.MihomoPID
+	result.Message = saved.Message
 	if result.State != "running" {
 		result.MihomoPID = 0
 	}
 	return result
+}
+
+func clearRuntimeMessage(paths appPaths) error {
+	saved := readRuntimeState(paths)
+	return writeRuntimeState(paths, saved.MihomoPID, "")
 }
 
 func serviceStateName(state svc.State) string {

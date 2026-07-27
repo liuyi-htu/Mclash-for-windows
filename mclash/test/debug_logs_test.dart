@@ -12,7 +12,22 @@ void main() {
     temporaryDirectory = await Directory.systemTemp.createTemp(
       'mclash-debug-logs-',
     );
-    service = WindowsProxyPlatformService(dataDir: temporaryDirectory.path);
+    service = WindowsProxyPlatformService(
+      dataDir: temporaryDirectory.path,
+      serviceProcessRunner: (executable, arguments) async {
+        if (arguments.first == 'clear-runtime-message') {
+          final runtime = File(
+            '${temporaryDirectory.path}\\runtime-state.json',
+          );
+          final decoded = await runtime.exists()
+              ? jsonDecode(await runtime.readAsString()) as Map<String, dynamic>
+              : <String, dynamic>{};
+          decoded['message'] = '';
+          await runtime.writeAsString(jsonEncode(decoded));
+        }
+        return ProcessResult(1, 0, '', '');
+      },
+    );
   });
 
   tearDown(() => temporaryDirectory.delete(recursive: true));
@@ -46,8 +61,13 @@ void main() {
       ).writeAsString('service entry');
       await File('${directory.path}\\mihomo.log').writeAsString('mihomo entry');
       await File('${directory.path}\\update.log').writeAsString('update entry');
-      await File('${temporaryDirectory.path}\\state.json').writeAsString(
-        jsonEncode(<String, dynamic>{'message': 'startup failed'}),
+      await File(
+        '${temporaryDirectory.path}\\runtime-state.json',
+      ).writeAsString(
+        jsonEncode(<String, dynamic>{
+          'mihomoPid': 123,
+          'message': 'startup failed',
+        }),
       );
 
       await expectLater(
@@ -71,11 +91,12 @@ void main() {
       final state =
           jsonDecode(
                 await File(
-                  '${temporaryDirectory.path}\\state.json',
+                  '${temporaryDirectory.path}\\runtime-state.json',
                 ).readAsString(),
               )
               as Map<String, dynamic>;
       expect(state['message'], isEmpty);
+      expect(state['mihomoPid'], 123);
     },
   );
 }
