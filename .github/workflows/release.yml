@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Build a prerelease, or promote the current prerelease without rebuilding
+        description: Select the release type
         required: true
-        default: build-prerelease
+        default: Pre-release
         type: choice
         options:
-          - build-prerelease
-          - promote-stable
+          - Pre-release
+          - release
 
 permissions:
   contents: write
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-release:
-    if: ${{ inputs.operation == 'build-prerelease' }}
+    if: ${{ inputs.operation == 'Pre-release' }}
     name: Build Windows prerelease
     runs-on: windows-latest
     timeout-minutes: 45
@@ -124,7 +124,7 @@ jobs:
             installer/Output/${{ env.INSTALLER_NAME }}.sha256
 
   promote-stable:
-    if: ${{ inputs.operation == 'promote-stable' }}
+    if: ${{ inputs.operation == 'release' }}
     name: Promote prerelease to stable
     runs-on: windows-latest
     timeout-minutes: 10
